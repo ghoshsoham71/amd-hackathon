@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Env & secrets
+.env
+*.env
+
+# Models (large files — not in image context)
+models/*.gguf
+models/*.bin
+models/*.safetensors
+
+# Test artifacts
+local_test/
+test_*.py
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

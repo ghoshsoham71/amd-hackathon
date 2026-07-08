@@ -1,0 +1,63 @@
+# =============================================================================
+# docker-compose.yml — Local Development Environment
+# =============================================================================
+# Usage:
+#   1. Copy .env.example → .env and fill in your credentials
+#   2. docker compose up --build
+#   3. Place tasks.json in ./local_test/input/
+#   4. Check ./local_test/output/results.json after completion
+#   5. Health check: curl http://localhost:8080/health
+#      Status:       curl http://localhost:8080/status
+#      Metrics:      curl http://localhost:8080/metrics
+# =============================================================================
+
+version: "3.9"
+
+services:
+
+  # ── Redis sidecar (local dev only — in production, Redis runs in same container) ──
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Agent (uvicorn + FastAPI) ──────────────────────────────────────────────
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      INPUT_PATH: /input/tasks.json
+      OUTPUT_PATH: /output/results.json
+      LOG_LEVEL: DEBUG
+    ports:
+      - "8080:8080"     # /health  /status  /metrics
+    volumes:
+      - ./local_test/input:/input:ro
+      - ./local_test/output:/output
+      - ./src:/app/src:ro   # hot-reload source during dev
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 30s
