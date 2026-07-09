@@ -2,29 +2,13 @@
 LangGraph agent graph — the central orchestrator for Track 1.
 
 Graph flow:
-  START
-    │
-    ▼
-  classify ──────────────────────────────────────────────────────────────┐
-    │                                                                     │
-    ▼                                                                     │
-  check_cache ──HIT──────────────────────────────────────────────────► END
-    │ MISS
-    ▼
-  local_l1 (Qwen2.5-1.5B)
-    │
-    ▼
-  validate_l1
-    ├── PASS ──► cache_store ──────────────────────────────────────────► END
-    └── FAIL ──► local_l2 (Qwen2.5-3B)
-                   │
-                   ▼
-                 validate_l2
-                   ├── PASS ──► cache_store ───────────────────────────► END
-                   └── FAIL ──► compress_prompt ──► fireworks_call
-                                                       │
-                                                       ▼
-                                                     cache_store ──────► END
+  START → classify → local_infer
+                          ├── PASS  → END          (free, no Fireworks tokens)
+                          └── FAIL  → compress_prompt → fireworks_call → END
+
+Local inference (Qwen2.5-3B) is attempted first for categories where a 3B model
+is reliable (factual, sentiment, summarization, NER). Hard categories (code, logic,
+math) and high-difficulty tasks skip straight to Fireworks.
 
 State is fully typed (TypedDict) and passed between nodes as a dict.
 """
@@ -57,7 +41,7 @@ class AgentState(TypedDict):
     # Processing
     compressed_prompt: str
     system_prompt: str
-    current_tier: int           # 1=L1 local, 2=L2 local, 3=Fireworks
+    current_tier: int           # 1=local (free), 3=Fireworks
     fireworks_models: list[str]
     answer: str
     confidence: float
@@ -78,6 +62,14 @@ class AgentState(TypedDict):
     error: str
 
 
+# ── Categories where local 3B is reliable enough to skip Fireworks ────────────
+# Code / logic / math require stronger reasoning → always go to Fireworks.
+_LOCAL_CAPABLE_CATEGORIES = {"factual", "sentiment", "summarization", "ner"}
+
+# Difficulty threshold above which we skip local and go straight to Fireworks
+_LOCAL_DIFFICULTY_CUTOFF = 0.75
+
+
 # ── Node implementations ──────────────────────────────────────────────────────
 
 def classify_node(state: AgentState) -> AgentState:
@@ -94,12 +86,12 @@ def classify_node(state: AgentState) -> AgentState:
         "category": cat,
         "difficulty": diff,
         "system_prompt": sys_p,
-        # Append output guidance to prompt (not system) to save sys tokens
+        # Append output guidance to prompt (not system) to save system tokens
         "compressed_prompt": f"{prompt}\n\n{guidance}" if guidance else prompt,
         "answer": "",
         "confidence": 0.0,
         "cached": False,
-        "current_tier": 3,
+        "current_tier": 1,
         "fireworks_models": [],
         "fireworks_input_tokens": 0,
         "fireworks_output_tokens": 0,
@@ -109,10 +101,75 @@ def classify_node(state: AgentState) -> AgentState:
     }
 
 
+def local_infer_node(state: AgentState) -> AgentState:
+    """
+    Run local Qwen2.5-3B inference (zero token cost).
+
+    For categories where the 3B model is unlikely to be accurate (code, logic,
+    hard math) we skip straight to Fireworks. For easy categories we try local
+    first and only escalate if the validator rejects the answer.
+    """
+    from src import local_model, validator
+
+    category   = state["category"]
+    difficulty = state["difficulty"]
+
+    # Hard categories or high difficulty: skip local, go straight to Fireworks
+    skip_local = (
+        category not in _LOCAL_CAPABLE_CATEGORIES
+        or difficulty >= _LOCAL_DIFFICULTY_CUTOFF
+        or not local_model.is_available()
+    )
+
+    if skip_local:
+        logger.info(
+            "[%s] Skipping local inference (cat=%s diff=%.2f) → Fireworks",
+            state["task_id"], category, difficulty,
+        )
+        return {**state, "current_tier": 3, "confidence": 0.0}
+
+    logger.info("[%s] Running local inference (tier 1)...", state["task_id"])
+
+    answer = local_model.infer(
+        system_prompt=state["system_prompt"],
+        user_prompt=state["compressed_prompt"],
+        max_tokens=384,
+        temperature=0.05,
+    )
+
+    if not answer:
+        logger.warning("[%s] Local model returned empty answer", state["task_id"])
+        return {**state, "current_tier": 3, "confidence": 0.0}
+
+    confidence, passed = validator.validate(answer, category)
+    logger.info(
+        "[%s] Local answer: conf=%.2f pass=%s",
+        state["task_id"], confidence, passed,
+    )
+
+    return {
+        **state,
+        "answer": answer,
+        "confidence": confidence,
+        "current_tier": 1 if passed else 3,
+    }
+
+
+def route_after_local(state: AgentState) -> str:
+    """
+    Conditional edge after local_infer_node.
+      - Local passed validation → END  (free answer, zero Fireworks tokens)
+      - Otherwise              → compress_prompt → fireworks_call
+    """
+    if state["current_tier"] == 1 and state.get("answer", ""):
+        logger.info("[%s] Local answer accepted — skipping Fireworks", state["task_id"])
+        return "end"
+    return "compress_prompt"
+
+
 def compress_prompt_node(state: AgentState) -> AgentState:
     """
-    Compress prompt before Fireworks call.
-    Also select the Fireworks model.
+    Compress prompt before Fireworks call and select the Fireworks model.
     """
     category   = state["category"]
     difficulty = state["difficulty"]
@@ -132,7 +189,7 @@ def compress_prompt_node(state: AgentState) -> AgentState:
         prompt=state["compressed_prompt"],
         category=category,
         available_tokens=budget.available,
-        aggressive=False,  
+        aggressive=False,
     )
 
     saved = count_tokens(state["compressed_prompt"]) - count_tokens(compressed)
@@ -148,17 +205,23 @@ def compress_prompt_node(state: AgentState) -> AgentState:
 
 
 def fireworks_call_node(state: AgentState) -> AgentState:
-    """Call Fireworks API with compressed prompt, using dynamic fallback."""
+    """Call Fireworks API with compressed prompt, using dynamic model fallback."""
     model_ids = state.get("fireworks_models", [])
     if not model_ids:
         return {**state, "answer": state.get("answer", ""), "error": "no_fw_models"}
 
-    # Give models enough room to finish their thoughts
-    max_out = 512
-    if state["category"] in ("code_gen", "code_debug"):
+    # Tune max output tokens per category — avoids paying for unused token budget
+    category = state["category"]
+    if category in ("code_gen", "code_debug"):
         max_out = 1024
-    elif state["category"] == "logic":
-        max_out = 800
+    elif category == "logic":
+        max_out = 600
+    elif category == "math":
+        max_out = 256
+    elif category in ("sentiment", "ner"):
+        max_out = 150
+    else:
+        max_out = 400
 
     answer, in_tok, out_tok = router.call_fireworks(
         model_ids=model_ids,
@@ -183,22 +246,35 @@ def fireworks_call_node(state: AgentState) -> AgentState:
     }
 
 
-
-
 # ── Build the graph ───────────────────────────────────────────────────────────
 
 def build_graph() -> StateGraph:
-    """Construct and compile the LangGraph agent."""
+    """
+    Construct and compile the LangGraph agent.
+
+    Flow:
+      START → classify → local_infer
+                              ├── pass  → END          (free, no Fireworks)
+                              └── fail  → compress_prompt → fireworks_call → END
+    """
     builder = StateGraph(AgentState)
 
     # Add nodes
     builder.add_node("classify",        classify_node)
+    builder.add_node("local_infer",     local_infer_node)
     builder.add_node("compress_prompt", compress_prompt_node)
     builder.add_node("fireworks_call",  fireworks_call_node)
 
-    # Entry
+    # Edges
     builder.add_edge(START, "classify")
-    builder.add_edge("classify", "compress_prompt")
+    builder.add_edge("classify", "local_infer")
+
+    # Conditional: local passed → END, else → compress+fireworks
+    builder.add_conditional_edges(
+        "local_infer",
+        route_after_local,
+        {"end": END, "compress_prompt": "compress_prompt"},
+    )
     builder.add_edge("compress_prompt", "fireworks_call")
     builder.add_edge("fireworks_call",  END)
 
@@ -222,7 +298,7 @@ def run_task(task_id: str, prompt: str) -> dict:
 
     Returns
     -------
-    dict with keys: task_id, answer, meta (token stats)
+    dict with keys: task_id, answer, _meta (token stats)
     """
     graph = get_graph()
 
@@ -237,6 +313,7 @@ def run_task(task_id: str, prompt: str) -> dict:
         "answer": "",
         "confidence": 0.0,
         "cached": False,
+        "fireworks_models": [],
         "fireworks_input_tokens": 0,
         "fireworks_output_tokens": 0,
         "local_tokens": 0,

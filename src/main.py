@@ -166,6 +166,11 @@ def run_all_tasks(tasks: list[dict]) -> list[dict]:
     Respects global 9.5-minute deadline — any task not started before deadline
     is answered with a fallback rather than missing from output entirely.
     """
+    global _START_TIME
+    # Reset deadline from NOW (actual processing start), not module import time.
+    # Model loading can take 1-2 min and would otherwise eat into the budget.
+    _START_TIME = time.time()
+
     from src.graph import run_task
     from src.token_counter import GLOBAL_TRACKER
 
@@ -204,7 +209,9 @@ def run_all_tasks(tasks: list[dict]) -> list[dict]:
 
             task = future_to_task[future]
             try:
-                result = future.result(timeout=max(remaining - 10, 10))
+                # Per-task timeout: no single task should take more than 90s
+                per_task_timeout = min(max(remaining - 10, 10), 90)
+                result = future.result(timeout=per_task_timeout)
                 results.append(result)
 
                 meta = result.get("_meta", {})
@@ -249,8 +256,7 @@ def main():
     # 3. Preload local models (non-blocking: they lazy-load on first call)
     #    We do a non-blocking availability check here
     from src.local_model import is_available
-    logger.info("L1 model available: %s", is_available(1))
-    logger.info("L2 model available: %s", is_available(2))
+    logger.info("Local model available: %s", is_available())
 
     # 4. Load tasks
     tasks = load_tasks(INPUT_PATH)

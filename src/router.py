@@ -33,9 +33,9 @@ except ImportError:
     logger.warning("openai package not installed — Fireworks calls disabled")
 
 # ── Non-model config (safe to read with defaults) ─────────────────────────────
-MAX_RETRIES     = int(os.environ.get("FW_MAX_RETRIES", "3"))
-RETRY_DELAY     = float(os.environ.get("FW_RETRY_DELAY", "2.0"))
-REQUEST_TIMEOUT = int(os.environ.get("FW_TIMEOUT", "25"))  # must stay under 30s limit
+MAX_RETRIES     = int(os.environ.get("FW_MAX_RETRIES", "2"))
+RETRY_DELAY     = float(os.environ.get("FW_RETRY_DELAY", "1.0"))
+REQUEST_TIMEOUT = int(os.environ.get("FW_TIMEOUT", "20"))  # must stay under 30s limit
 
 # ── ALLOWED_MODELS — parsed lazily on first use, never at import time ─────────
 # Parsed lazily so the module can be imported in tests without the env var set.
@@ -240,9 +240,8 @@ def call_fireworks(
         {"role": "user",   "content": user_prompt},
     ]
 
-    for attempt in range(MAX_RETRIES):
-        # Try each model in the list once per attempt cycle
-        for model_id in model_ids:
+    for model_id in model_ids:
+        for attempt in range(MAX_RETRIES):
             try:
                 response = client.chat.completions.create(
                     model=model_id,
@@ -263,18 +262,27 @@ def call_fireworks(
                 return text, input_tok, output_tok
 
             except Exception as e:
-                # Log and continue to the NEXT model in the list
-                logger.warning(
-                    "Fireworks %s failed (attempt %d): %s. Switching to next model...", 
-                    model_id.split("/")[-1], attempt + 1, e
-                )
-        
-        # All models failed in this cycle. Wait before retrying the full list.
-        if attempt < MAX_RETRIES - 1:
-            logger.warning("All capable models failed. Waiting %.1fs before full retry...", RETRY_DELAY)
-            time.sleep(RETRY_DELAY)
+                err_str = str(e).lower()
+                # Don't retry on permanent errors (auth, not found, bad request)
+                is_permanent = any(x in err_str for x in (
+                    "401", "403", "404", "400", "invalid_api_key",
+                    "model_not_found", "not found",
+                ))
+                if is_permanent:
+                    logger.error(
+                        "Fireworks %s permanent error (not retrying): %s",
+                        model_id.split("/")[-1], e,
+                    )
+                    break  # skip remaining attempts for this model
 
-    logger.error("Fireworks call failed after %d cycles across all capable models", MAX_RETRIES)
+                logger.warning(
+                    "Fireworks %s transient error (attempt %d/%d): %s. Retrying...",
+                    model_id.split("/")[-1], attempt + 1, MAX_RETRIES, e,
+                )
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(RETRY_DELAY)
+
+    logger.error("Fireworks call failed across all capable models")
     return None, 0, 0
 
 

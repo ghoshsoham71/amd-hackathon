@@ -1,64 +1,78 @@
 """
-Category-specific minimized system prompts.
+Category-specific system prompts — AMD Hackathon Track 1.
 
-Design principle: Every token in the system prompt is COUNTED against our score
-when using the Fireworks API. These prompts are deliberately minimal — they give
-the model just enough context to produce accurate, well-formatted answers without
-any filler words.
-
-Each prompt is tuned to:
-1. Suppress unnecessary preamble ("Of course!", "Certainly!", "Great question!")
-2. Enforce a specific output format for easy validation
-3. Stay under 30 tokens
+Design principles:
+1. Every token in the system prompt is SCORED — keep them minimal.
+2. Output guidance is appended to the USER message instead of duplicated here.
+3. For tasks requiring reasoning (logic, math), allow internal reasoning but
+   enforce a strict final-answer format so validation works and output is short.
+4. For purely extractive tasks (sentiment, NER), no reasoning needed.
 """
 
 from typing import Dict
 
-# ── Core minimal system prompts ──────────────────────────────────────────────
+# ── Core system prompts ────────────────────────────────────────────────────────
+# Rule: system prompt only. Output guidance is in OUTPUT_GUIDANCE (appended
+# to user message). Do NOT duplicate these here — it wastes scored tokens.
 SYSTEM_PROMPTS: Dict[str, str] = {
+    # Factual: direct answer, no filler, no caveats
     "factual": (
-        "Answer accurately and concisely. DO NOT output reasoning or thoughts. State facts directly."
+        "You are a factual assistant. Answer directly and concisely. "
+        "No preamble, no caveats, no apologies."
     ),
+    # Math: allow internal reasoning but output ONLY the final numeric answer
     "math": (
-        "DO NOT show working or reasoning. End with: ANSWER: <number>"
+        "Solve the problem step by step, then output ONLY: ANSWER: <number>"
     ),
+    # Sentiment: strict label, no prose
     "sentiment": (
-        "Classify sentiment as Positive, Negative, or Mixed. DO NOT output reasoning. "
-        "Format: SENTIMENT: <label>"
+        "Output ONLY: SENTIMENT: Positive, SENTIMENT: Negative, "
+        "SENTIMENT: Neutral, or SENTIMENT: Mixed. No explanation."
     ),
+    # Summarization: produce only the summary, match requested length
     "summarization": (
-        "Summarize as instructed. Be concise. DO NOT output reasoning. Provide ONLY the final summary."
+        "Summarize the provided text. Output ONLY the summary. "
+        "No preamble or meta-commentary."
     ),
+    # NER: strict JSON, no prose around it
     "ner": (
-        "Extract named entities. Output JSON array only. NO REASONING. "
-        '[{"text":"...","type":"PERSON|ORG|LOC|DATE|OTHER"}]'
+        'Extract named entities. Output ONLY a JSON array: '
+        '[{"text":"...","type":"PERSON|ORG|LOC|DATE|OTHER"}]. '
+        "No markdown fences, no explanation."
     ),
+    # Code debug: return corrected code only, minimal comment if essential
     "code_debug": (
-        "Find the bug and return ONLY the corrected code. DO NOT output reasoning or thought blocks."
+        "Fix the bug in the code. Return ONLY the corrected, complete code. "
+        "No explanation before or after."
     ),
+    # Logic: MUST reason to get correct answer, but format is strict
     "logic": (
-        "DO NOT output reasoning. Provide ONLY the final answer: "
-        "ANSWER: <answer>"
+        "Reason through the problem carefully, then output ONLY: ANSWER: <value>. "
+        "Put all reasoning before the ANSWER line."
     ),
+    # Code gen: Python only, no prose, no markdown explanation outside code block
     "code_gen": (
-        "Write correct, idiomatic Python. Code only. DO NOT output reasoning, thought process, or explanations."
+        "Write correct, complete, idiomatic Python. "
+        "Return ONLY the code. No prose, no explanation."
     ),
 }
 
-# ── Output length guidance appended to user prompt (not system) ───────────────
+# ── Output guidance appended to USER message (not duplicated from system) ──────
+# These are short reminders that reinforce the format. They should NOT repeat
+# the system prompt verbatim — that wastes tokens.
 OUTPUT_GUIDANCE: Dict[str, str] = {
-    "factual":       "Be concise. DO NOT output reasoning or <think> blocks.",
-    "math":          "DO NOT show working. Provide ONLY the final answer: ANSWER: <value>",
-    "sentiment":     "One line max. DO NOT output reasoning.",
-    "summarization": "Match the requested length exactly. DO NOT output your reasoning or thought process. Provide ONLY the final summary.",
-    "ner":           "JSON array only, no markdown wrapping. NO REASONING.",
-    "code_debug":    "Return only corrected code block. NO REASONING or explanations.",
-    "logic":         "DO NOT output your reasoning. Provide ONLY the final answer: ANSWER: <value>",
-    "code_gen":      "Code only, no prose. DO NOT output reasoning.",
+    "factual":       "Answer in 1-3 sentences max.",
+    "math":          "Show brief working if needed, then: ANSWER: <number>",
+    "sentiment":     "SENTIMENT: <Positive|Negative|Neutral|Mixed>",
+    "summarization": "Provide ONLY the summary. Match length requested.",
+    "ner":           'JSON array only: [{"text":"...","type":"..."}]',
+    "code_debug":    "Corrected code only. No prose.",
+    "logic":         "Reason first, then end with: ANSWER: <value>",
+    "code_gen":      "Python code only. No prose.",
 }
 
 # ── Difficulty estimation keywords per category ────────────────────────────────
-DIFFICULTY_SIGNALS: Dict[str, Dict[str, float]] = {
+DIFFICULTY_SIGNALS: Dict[str, Dict[str, list]] = {
     "factual": {
         "high": ["compare", "contrast", "explain why", "mechanism", "history of"],
         "low":  ["what is", "define", "capital of", "who is", "when was"],

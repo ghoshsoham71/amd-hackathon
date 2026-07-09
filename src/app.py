@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -140,7 +141,20 @@ async def lifespan(app: FastAPI):
             logger.error("Pipeline error: %s", e, exc_info=True)
             _state["status"] = "error"
             _state["error"] = str(e)
-            
+            # ── Always write results.json even on error ──
+            # Missing file = score zero AND may fail harness validation.
+            # An empty array at least produces valid JSON and a clean exit.
+            try:
+                write_results([], OUTPUT_PATH)
+                logger.warning("Wrote empty results.json after pipeline error")
+            except Exception as write_err:
+                logger.error("Failed to write fallback results.json: %s", write_err)
+        finally:
+            # ── Critical: shut down uvicorn so the container exits cleanly ──
+            # Without this the server runs forever and the harness times out.
+            logger.info("Sending SIGTERM to self to trigger clean shutdown...")
+            signal.raise_signal(signal.SIGTERM)
+
     # Start the worker task in the background
     worker_task = asyncio.create_task(background_worker())
 
@@ -153,7 +167,11 @@ async def lifespan(app: FastAPI):
     # Wait for the background task if it hasn't finished (with a short timeout)
     if not worker_task.done():
         logger.info("Waiting for background task to finish...")
-        worker_task.cancel()
+        try:
+            await asyncio.wait_for(worker_task, timeout=10.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            logger.warning("Background task did not finish in time — cancelling")
+            worker_task.cancel()
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
