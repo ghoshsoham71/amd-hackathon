@@ -11,7 +11,7 @@
 # =============================================================================
 
 # ── Stage 1: Builder ──────────────────────────────────────────────────────────
-FROM python:3.11-slim AS builder
+FROM --platform=linux/amd64 python:3.11-slim AS builder
 
 # Build dependencies for llama-cpp-python
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -56,7 +56,7 @@ RUN python -c "import huggingface_hub; huggingface_hub.hf_hub_download(repo_id='
 
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
-FROM python:3.11-slim AS runtime
+FROM --platform=linux/amd64 python:3.11-slim AS runtime
 
 # Runtime system deps: OpenMP (libgomp1) is required for llama-cpp-python
 RUN apt-get update && apt-get install -y --no-install-recommends \
