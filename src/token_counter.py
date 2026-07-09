@@ -15,19 +15,25 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
-import tiktoken
-
 logger = logging.getLogger(__name__)
 
-# One encoder instance shared across the process (thread-safe after init)
-_ENCODER = tiktoken.get_encoding("cl100k_base")
+try:
+    import tiktoken
+    _ENCODER = tiktoken.get_encoding("cl100k_base")
+    _TIKTOKEN_AVAILABLE = True
+except Exception:
+    _TIKTOKEN_AVAILABLE = False
+    _ENCODER = None  # type: ignore[assignment]
 
 
 def count_tokens(text: str) -> int:
     """Return approximate token count for `text`."""
     if not text:
         return 0
-    return len(_ENCODER.encode(text, disallowed_special=()))
+    if _TIKTOKEN_AVAILABLE and _ENCODER is not None:
+        return len(_ENCODER.encode(text, disallowed_special=()))
+    # Fallback: ~4 chars per token (rough but safe estimate)
+    return max(1, len(text) // 4)
 
 
 def count_tokens_multi(*texts: str) -> int:

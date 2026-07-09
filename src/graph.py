@@ -16,8 +16,8 @@ State is fully typed (TypedDict) and passed between nodes as a dict.
 from __future__ import annotations
 
 import logging
-import os
-from typing import Literal, Optional, TypedDict
+import threading
+from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
@@ -289,12 +289,15 @@ def build_graph() -> StateGraph:
 
 # ── Compiled graph singleton ──────────────────────────────────────────────────
 _graph = None
+_graph_lock = threading.Lock()
 
 def get_graph():
     global _graph
     if _graph is None:
-        _graph = build_graph()
-        logger.info("LangGraph compiled successfully")
+        with _graph_lock:
+            if _graph is None:   # double-checked locking
+                _graph = build_graph()
+                logger.info("LangGraph compiled successfully")
     return _graph
 
 

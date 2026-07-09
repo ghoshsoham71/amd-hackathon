@@ -21,16 +21,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import signal
-import sys
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger("app")
@@ -104,6 +99,8 @@ async def lifespan(app: FastAPI):
 
     # Import here to avoid circular imports at module level
     from src.main import (
+        INPUT_PATH,
+        OUTPUT_PATH,
         load_tasks,
         run_all_tasks,
         validate_env,
@@ -113,16 +110,30 @@ async def lifespan(app: FastAPI):
     # 1. Load env vars (non-fatal warnings only)
     validate_env()
 
-    # 3. Load tasks
-    from src.main import INPUT_PATH, OUTPUT_PATH
-    tasks = load_tasks(INPUT_PATH)
-    _state["tasks_total"] = len(tasks)
-    _state["status"] = "processing"
-    logger.info("Loaded %d tasks — beginning processing", len(tasks))
+    # 3. Load tasks — catch errors so we still reach yield and /health responds
+    try:
+        tasks = load_tasks(INPUT_PATH)
+        _state["tasks_total"] = len(tasks)
+        _state["status"] = "processing"
+        logger.info("Loaded %d tasks — beginning processing", len(tasks))
+    except Exception as load_err:
+        logger.error("Failed to load tasks: %s — will write empty results", load_err)
+        tasks = []
+        _state["tasks_total"] = 0
+        _state["status"] = "error"
+        _state["error"] = str(load_err)
 
     # We need to run the pipeline in the background so FastAPI can actually start
     # and serve the /status and /docs endpoints immediately.
-    loop = asyncio.get_event_loop()
+    # Pre-warm the LangGraph (compiles the graph before any worker thread touches it)
+    try:
+        from src.graph import get_graph
+        get_graph()
+        logger.info("LangGraph pre-warmed")
+    except Exception as e:
+        logger.warning("Graph pre-warm failed (will retry on first task): %s", e)
+
+    loop = asyncio.get_running_loop()  # correct for async context (3.10+ safe)
     
     async def background_worker():
         try:
@@ -151,12 +162,12 @@ async def lifespan(app: FastAPI):
                 logger.error("Failed to write fallback results.json: %s", write_err)
         finally:
             # ── Critical: exit cleanly with code 0 ──
-            # signal.raise_signal(signal.SIGTERM) causes uvicorn to exit with code 143,
-            # which the grading harness marks as a RUNTIME_ERROR.
-            # os._exit(0) ensures the container stops immediately with exit code 0.
-            logger.info("Exiting container with code 0...")
-            import os
-            os._exit(0)
+            # Send SIGTERM to ourselves so uvicorn runs its graceful shutdown
+            # and exits with code 0. os._exit(0) bypasses the uvicorn event loop,
+            # which can cause the harness to see a non-zero exit (RUNTIME_ERROR).
+            logger.info("Exiting container with code 0 (SIGTERM self-signal)...")
+            import os, signal
+            os.kill(os.getpid(), signal.SIGTERM)
 
     # Start the worker task in the background
     worker_task = asyncio.create_task(background_worker())
@@ -165,16 +176,12 @@ async def lifespan(app: FastAPI):
     yield
 
     # ── SHUTDOWN PHASE ──
-    logger.info("Lifespan complete — shutting down")
-    
-    # Wait for the background task if it hasn't finished (with a short timeout)
-    if not worker_task.done():
-        logger.info("Waiting for background task to finish...")
-        try:
-            await asyncio.wait_for(worker_task, timeout=10.0)
-        except (asyncio.TimeoutError, asyncio.CancelledError):
-            logger.warning("Background task did not finish in time — cancelling")
-            worker_task.cancel()
+    # background_worker's finally block sends SIGTERM to trigger this shutdown,
+    # so by the time we get here the worker is already done or nearly done.
+    # We do NOT await it here — cancel() on run_in_executor is a no-op (threads
+    # can't be cancelled by asyncio), and waiting risks a 10s deadlock if an
+    # external SIGTERM arrives before the worker finishes.
+    logger.info("Lifespan shutdown complete")
 
 
 # ── App ───────────────────────────────────────────────────────────────────────

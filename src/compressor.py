@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import logging
 import re
-from math import log
 from typing import Dict, List, Optional
 
 from src.token_counter import count_tokens

@@ -194,15 +194,16 @@ def get_capable_models(category: str, difficulty: float) -> List[str]:
 def _get_client() -> Optional["OpenAI"]:
     """
     Return an OpenAI-compatible client pointed at FIREWORKS_BASE_URL.
-
-    Both API key and base URL are read strictly from the environment —
-    the harness injects them; using your own key or URL bypasses token tracking.
+    Returns None if env vars are not set (harness hasn't injected them yet).
     """
     if not _OPENAI_AVAILABLE:
         return None
-
-    api_key  = os.environ["FIREWORKS_API_KEY"]   # KeyError if not injected
-    base_url = os.environ["FIREWORKS_BASE_URL"]  # KeyError if not injected
+    try:
+        api_key  = os.environ["FIREWORKS_API_KEY"]
+        base_url = os.environ["FIREWORKS_BASE_URL"]
+    except KeyError as e:
+        logger.warning("Fireworks env var not set: %s — skipping API call", e)
+        return None
 
     return OpenAI(
         api_key=api_key,

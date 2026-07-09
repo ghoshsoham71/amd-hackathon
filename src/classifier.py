@@ -33,6 +33,19 @@ from src.prompts import (
 logger = logging.getLogger(__name__)
 
 
+# ── Valid category keys — defined at module level so classify() can reference it
+CATEGORY_NAMES: dict[str, str] = {
+    "factual":       "1-Factual Knowledge",
+    "math":          "2-Mathematical Reasoning",
+    "sentiment":     "3-Sentiment Classification",
+    "summarization": "4-Text Summarisation",
+    "ner":           "5-Named Entity Recognition",
+    "code_debug":    "6-Code Debugging",
+    "logic":         "7-Logical/Deductive Reasoning",
+    "code_gen":      "8-Code Generation",
+}
+
+
 # ── Regex patterns for high-confidence classification ─────────────────────────
 _PATTERNS: list[Tuple[str, re.Pattern]] = [
     ("math", re.compile(
@@ -149,7 +162,7 @@ def classify(prompt: str) -> Tuple[str, float]:
     # Pick highest, break ties with CATEGORY_ORDER priority
     best_cat = max(CATEGORY_ORDER, key=lambda c: scores[c])
     difficulty = _difficulty_score(prompt, best_cat)
-    
+
     # ── Phase 3: Local LLM Fallback (if low keyword confidence) ──────────────
     if scores[best_cat] < 0.3 and local_model.is_available():
         system_msg = (
@@ -165,13 +178,14 @@ def classify(prompt: str) -> Tuple[str, float]:
         )
         if answer:
             clean_answer = answer.strip().lower()
+            # Check against valid category KEYS (e.g. "factual", not "1-Factual Knowledge")
             if clean_answer in CATEGORY_NAMES:
                 best_cat = clean_answer
                 logger.info("classify[llm] override to %s", best_cat)
 
     logger.debug(
         "classify[final] %s (score=%.2f) difficulty=%.2f",
-        best_cat, scores[best_cat] if best_cat in scores else 1.0, difficulty,
+        best_cat, scores.get(best_cat, 1.0), difficulty,
     )
     return best_cat, difficulty
 
@@ -179,16 +193,3 @@ def classify(prompt: str) -> Tuple[str, float]:
 def classify_batch(prompts: list[str]) -> list[Tuple[str, float]]:
     """Classify a list of prompts."""
     return [classify(p) for p in prompts]
-
-
-# ── Human-readable category mapping ──────────────────────────────────────────
-CATEGORY_NAMES: dict[str, str] = {
-    "factual":       "1-Factual Knowledge",
-    "math":          "2-Mathematical Reasoning",
-    "sentiment":     "3-Sentiment Classification",
-    "summarization": "4-Text Summarisation",
-    "ner":           "5-Named Entity Recognition",
-    "code_debug":    "6-Code Debugging",
-    "logic":         "7-Logical/Deductive Reasoning",
-    "code_gen":      "8-Code Generation",
-}
