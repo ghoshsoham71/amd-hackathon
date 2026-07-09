@@ -58,9 +58,10 @@ RUN python -c "import huggingface_hub; huggingface_hub.hf_hub_download(repo_id='
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM python:3.11-slim AS runtime
 
-# Runtime system deps: None required beyond Python standard
+# Runtime system deps: OpenMP (libgomp1) is required for llama-cpp-python
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -75,13 +76,13 @@ COPY --from=builder /models /app/models
 COPY src/ ./src/
 COPY pyproject.toml .
 COPY entrypoint.sh .
-RUN chmod +x entrypoint.sh
+RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
 
 # Install the package in editable-equivalent mode (no build, just src on path)
 RUN pip install --no-cache-dir --no-deps -e .
 
-# Create required directories
-RUN mkdir -p /input /output
+# Create required directories and ensure they are world-writable
+RUN mkdir -p /input /output && chmod 777 /input /output
 
 # ── Environment defaults ───────────────────────────────────────────────────────
 # Harness overrides FIREWORKS_* and ALLOWED_MODELS at evaluation time.

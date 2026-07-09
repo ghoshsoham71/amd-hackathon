@@ -68,21 +68,26 @@ def _init_model_registry() -> None:
     if _allowed_models_set is not None:
         return
 
-    models = _parse_allowed_models()
-    _allowed_models_set = set(models)
+    try:
+        models = _parse_allowed_models()
+        _allowed_models_set = set(models)
 
-    ranked: List[Tuple[float, str]] = [
-        (_parse_model_size(m), m) for m in models
-    ]
-    ranked.sort(key=lambda x: x[0])
-    _sorted_models = ranked
+        ranked: List[Tuple[float, str]] = [
+            (_parse_model_size(m), m) for m in models
+        ]
+        ranked.sort(key=lambda x: x[0])
+        _sorted_models = ranked
 
-    logger.info(
-        "ALLOWED_MODELS registry: %d models loaded",
-        len(models),
-    )
-    for size, mid in ranked:
-        logger.info("  %.0fB  %s", size, mid)
+        logger.info(
+            "ALLOWED_MODELS registry: %d models loaded",
+            len(models),
+        )
+        for size, mid in ranked:
+            logger.info("  %.0fB  %s", size, mid)
+    except (KeyError, ValueError) as e:
+        logger.error("Failed to initialize ALLOWED_MODELS registry: %s", e)
+        _allowed_models_set = set()
+        _sorted_models = []
 
 
 def is_model_allowed(model_id: str) -> bool:

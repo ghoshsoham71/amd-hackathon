@@ -116,46 +116,36 @@ def infer(
 ) -> Optional[str]:
     """
     Run local inference.
-
-    Parameters
-    ----------
-    system_prompt : str
-    user_prompt : str
-    max_tokens : int
-        Max output tokens.
-    temperature : float
-        Sampling temperature. Low = more deterministic.
-
-    Returns
-    -------
-    str | None
-        Generated text, or None if the model is unavailable.
     """
     model = _get_model()
     if model is None:
         logger.warning("Local model unavailable — skipping inference")
         return None
 
-    try:
-        prompt_text = _build_chat_prompt(system_prompt, user_prompt, model)
+    # ── Thread Safety: Lock during inference execution ──
+    # llama.cpp's internal state is NOT thread-safe. Concurrent inference
+    # on the same model instance causes memory corruption (Segmentation Fault).
+    with _lock:
+        try:
+            prompt_text = _build_chat_prompt(system_prompt, user_prompt, model)
 
-        output = model(
-            prompt_text,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            top_p=top_p,
-            stop=["<|im_end|>", "<|endoftext|>", "\n\n\n"],
-            echo=False,
-        )
+            output = model(
+                prompt_text,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                stop=["<|im_end|>", "<|endoftext|>", "\n\n\n"],
+                echo=False,
+            )
 
-        text = output["choices"][0]["text"].strip()
-        tokens_used = output["usage"]["total_tokens"]
-        logger.debug("Local inference: %d tokens → %d chars", tokens_used, len(text))
-        return text
+            text = output["choices"][0]["text"].strip()
+            tokens_used = output["usage"]["total_tokens"]
+            logger.debug("Local inference: %d tokens → %d chars", tokens_used, len(text))
+            return text
 
-    except Exception as e:
-        logger.error("Local inference error: %s", e)
-        return None
+        except Exception as e:
+            logger.error("Local inference error: %s", e)
+            return None
 
 
 def preload_models() -> dict:

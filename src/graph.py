@@ -66,8 +66,14 @@ class AgentState(TypedDict):
 # Code / logic / math require stronger reasoning → always go to Fireworks.
 _LOCAL_CAPABLE_CATEGORIES = {"factual", "sentiment", "summarization", "ner"}
 
-# Difficulty threshold above which we skip local and go straight to Fireworks
-_LOCAL_DIFFICULTY_CUTOFF = 0.75
+# Difficulty threshold above which we skip local and go straight to Fireworks.
+# Keep this LOW (0.5) so only very easy tasks try local inference.
+# On 2 vCPU, local inference is ~3-5 tok/sec — only worth it for simple tasks.
+_LOCAL_DIFFICULTY_CUTOFF = 0.5
+
+# Max tokens for local inference — keeps each call under ~30s on 2 vCPU.
+# Short answers (sentiment, factual, NER) don't need long outputs anyway.
+_LOCAL_MAX_TOKENS = 96
 
 
 # ── Node implementations ──────────────────────────────────────────────────────
@@ -128,12 +134,12 @@ def local_infer_node(state: AgentState) -> AgentState:
         )
         return {**state, "current_tier": 3, "confidence": 0.0}
 
-    logger.info("[%s] Running local inference (tier 1)...", state["task_id"])
+    logger.info("[%s] Running local inference (tier 1, max_tokens=%d)...", state["task_id"], _LOCAL_MAX_TOKENS)
 
     answer = local_model.infer(
         system_prompt=state["system_prompt"],
         user_prompt=state["compressed_prompt"],
-        max_tokens=384,
+        max_tokens=_LOCAL_MAX_TOKENS,
         temperature=0.05,
     )
 
