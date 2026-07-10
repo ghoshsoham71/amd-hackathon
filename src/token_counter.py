@@ -1,7 +1,7 @@
 """
 Runtime token budget manager.
 
-Uses tiktoken (cl100k_base) for token counting — close enough to Fireworks
+Uses tiktoken (cl100k_base) for token counting - close enough to Fireworks
 model tokenizers for budgeting purposes. The 5-10% variance is accounted for
 by safety buffers.
 
@@ -41,13 +41,13 @@ def count_tokens_multi(*texts: str) -> int:
     return sum(count_tokens(t) for t in texts if t)
 
 
-# ── Model context limits ───────────────────────────────────────────────────────
+# -- Model context limits -------------------------------------------------------
 # Conservative limits (actual may be higher, but we stay safe)
 MODEL_CONTEXT_LIMITS: dict[str, int] = {
     # Local models
     "local_l1": 4096,
     "local_l2": 4096,
-    # Fireworks — will be overridden by runtime detection
+    # Fireworks - will be overridden by runtime detection
     "default": 4096,
     "8b":  8192,
     "13b": 8192,
@@ -56,7 +56,7 @@ MODEL_CONTEXT_LIMITS: dict[str, int] = {
     "mistral": 8192,
 }
 
-# Safety buffer — never fill the context completely
+# Safety buffer - never fill the context completely
 SAFETY_BUFFER = 256
 # Reserve for output generation
 OUTPUT_RESERVE = 512
@@ -171,8 +171,8 @@ class GlobalTokenTracker:
         logger.info("  Tasks processed     : %d", s["tasks"])
         logger.info("  Fireworks calls     : %d", s["fireworks_calls"])
         logger.info("  Fireworks tokens    : %d (SCORED)", s["fireworks_total_tokens"])
-        logger.info("    ↳ Input tokens    : %d", s["fireworks_input_tokens"])
-        logger.info("    ↳ Output tokens   : %d", s["fireworks_output_tokens"])
+        logger.info("    -> Input tokens    : %d", s["fireworks_input_tokens"])
+        logger.info("    -> Output tokens   : %d", s["fireworks_output_tokens"])
         logger.info("  Local calls         : %d", s["local_calls"])
         logger.info("  Local tokens        : %d (not scored)", s["local_tokens"])
         logger.info("=" * 60)

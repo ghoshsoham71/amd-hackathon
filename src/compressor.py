@@ -1,12 +1,12 @@
 """
-Prompt compressor — strips token fat before any Fireworks API call.
+Prompt compressor - strips token fat before any Fireworks API call.
 
 Techniques applied (in order):
-1. Instruction normalization — replace verbose instruction phrases with compact ones
-2. Passage pruning — for summarization/NER tasks, remove low-information sentences
+1. Instruction normalization - replace verbose instruction phrases with compact ones
+2. Passage pruning - for summarization/NER tasks, remove low-information sentences
    using TF-IDF scoring
-3. Stopword-light trimming — remove filler from context (not from task content)
-4. Token budget enforcement — truncate to fit within model context window
+3. Stopword-light trimming - remove filler from context (not from task content)
+4. Token budget enforcement - truncate to fit within model context window
 
 Design goal: Compress aggressively enough to save tokens, conservatively enough
 to preserve all task-relevant information. Accuracy > token savings.
@@ -23,7 +23,7 @@ from src import local_model
 
 logger = logging.getLogger(__name__)
 
-# ── Verbose → compact instruction phrase replacements ─────────────────────────
+# -- Verbose -> compact instruction phrase replacements -------------------------
 _INSTRUCTION_REPLACEMENTS: list[tuple[re.Pattern, str]] = [
     # Preambles
     (re.compile(r"please\s+(can\s+you\s+)?", re.I), ""),
@@ -61,7 +61,7 @@ def _normalize_instructions(text: str) -> str:
 
 
 
-# ── Main compress function ─────────────────────────────────────────────────────
+# -- Main compress function -----------------------------------------------------
 
 def compress_prompt(
     prompt: str,
@@ -90,7 +90,7 @@ def compress_prompt(
     """
     original_tokens = count_tokens(prompt)
 
-    # Already fits → no-op
+    # Already fits -> no-op
     if original_tokens <= available_tokens:
         return prompt
 
@@ -101,12 +101,12 @@ def compress_prompt(
 
     compressed = prompt
 
-    # ── Step 1: Instruction normalization (always safe) ───────────────────────
+    # -- Step 1: Instruction normalization (always safe) -----------------------
     compressed = _normalize_instructions(compressed)
     if count_tokens(compressed) <= available_tokens:
         return compressed
 
-    # ── Step 2: Use Local LLM for intelligent semantic compression ──
+    # -- Step 2: Use Local LLM for intelligent semantic compression --
     # The local model has 0 token cost, so we use it to rewrite the prompt.
     if local_model.is_available():
         system_msg = (
@@ -132,7 +132,7 @@ def compress_prompt(
             if count_tokens(answer) < count_tokens(compressed):
                 compressed = answer
 
-    # ── Step 3: Hard truncation fallback (last resort) ────────────────────────
+    # -- Step 3: Hard truncation fallback (last resort) ------------------------
 
     words = compressed.split()
     truncated: list[str] = []

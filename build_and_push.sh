@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# build_and_push.sh — Build and push to DockerHub for submission
+# build_and_push.sh - Build and push to DockerHub for submission
 # =============================================================================
 # Usage:
 #   DOCKERHUB_USER=yourusername ./build_and_push.sh
@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# -- Config --------------------------------------------------------------------
 DOCKERHUB_USER="${DOCKERHUB_USER:?Error: set DOCKERHUB_USER env var}"
 IMAGE_NAME="amd-track1"
 TAG="${TAG:-latest}"
@@ -21,12 +21,12 @@ echo "Image: ${FULL_TAG}"
 echo "Platform: linux/amd64 (required by grading harness)"
 echo "=================================================="
 
-# ── Ensure buildx builder exists ──────────────────────────────────────────────
+# -- Ensure buildx builder exists ----------------------------------------------
 docker buildx inspect amd-builder &>/dev/null || \
   docker buildx create --name amd-builder --use
 
-# ── Build and push ────────────────────────────────────────────────────────────
-# --platform linux/amd64: REQUIRED — grading VM is linux/amd64
+# -- Build and push ------------------------------------------------------------
+# --platform linux/amd64: REQUIRED - grading VM is linux/amd64
 # --push: publish directly to DockerHub (image must be public)
 docker buildx build \
   --platform linux/amd64 \

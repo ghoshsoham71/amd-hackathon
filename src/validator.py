@@ -1,10 +1,10 @@
 """
-Answer validator — checks whether a local model's answer meets quality bar.
+Answer validator - checks whether a local model's answer meets quality bar.
 
 For each category, apply targeted heuristics:
 - Non-empty, non-trivially-short response
 - Category-specific structural checks (math: number present, code: parses, etc.)
-- Confidence scoring: 0.0 (garbage) → 1.0 (confident)
+- Confidence scoring: 0.0 (garbage) -> 1.0 (confident)
 
 PASS threshold: confidence >= 0.65 (configurable via env VALIDATOR_THRESHOLD)
 """
@@ -34,7 +34,7 @@ MIN_ANSWER_CHARS = {
     "code_gen":      30,
 }
 
-# ── Refusal / failure patterns ────────────────────────────────────────────────
+# -- Refusal / failure patterns ------------------------------------------------
 _REFUSAL_PATTERNS = re.compile(
     r"\b(i (cannot|can't|am unable|don't know|do not know)|"
     r"i'm not sure|i (am|'m) sorry|as an ai|i apologize)\b",
@@ -55,7 +55,7 @@ def _base_confidence(answer: str, category: str) -> float:
 
     answer = answer.strip()
 
-    # Refusal → fail immediately
+    # Refusal -> fail immediately
     if _REFUSAL_PATTERNS.search(answer):
         return 0.1
 
@@ -213,7 +213,7 @@ def validate(answer: str, category: str) -> Tuple[float, bool]:
     passed = confidence >= PASS_THRESHOLD
 
     logger.debug(
-        "validate[%s] base=%.2f specific=%.2f → conf=%.2f pass=%s",
+        "validate[%s] base=%.2f specific=%.2f -> conf=%.2f pass=%s",
         category, base, specific, confidence, passed,
     )
     return confidence, passed

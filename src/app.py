@@ -1,5 +1,5 @@
 """
-FastAPI application — AMD Hackathon Track 1 Agent.
+FastAPI application - AMD Hackathon Track 1 Agent.
 
 Why FastAPI + uvicorn?
   - Satisfies the "container ready within 60 seconds" requirement with an
@@ -9,12 +9,12 @@ Why FastAPI + uvicorn?
   - Uvicorn's event loop is reused by all async components.
 
 Startup flow:
-  1. Uvicorn starts → FastAPI lifespan begins
+  1. Uvicorn starts -> FastAPI lifespan begins
   2. Redis server spawned as subprocess
   3. tasks.json loaded
   4. LangGraph pipeline runs tasks in background thread pool
   5. results.json written
-  6. App signals uvicorn to shutdown → exit 0
+  6. App signals uvicorn to shutdown -> exit 0
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger("app")
 
-# ── Response models (Pydantic) — powers Swagger typed schemas ─────────────────
+# -- Response models (Pydantic) - powers Swagger typed schemas -----------------
 
 class HealthResponse(BaseModel):
     status: str = Field("ok", description="Always 'ok' while process is alive")
@@ -76,7 +76,7 @@ class MetricsResponse(BaseModel):
         "local_tokens": 4821,
     }}}
 
-# ── Shared state ──────────────────────────────────────────────────────────────
+# -- Shared state --------------------------------------------------------------
 _state: dict = {
     "started_at":   None,
     "status":       "starting",   # starting | processing | done | error
@@ -86,7 +86,7 @@ _state: dict = {
 }
 
 
-# ── Lifespan (startup + shutdown) ─────────────────────────────────────────────
+# -- Lifespan (startup + shutdown) ---------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -110,14 +110,14 @@ async def lifespan(app: FastAPI):
     # 1. Load env vars (non-fatal warnings only)
     validate_env()
 
-    # 3. Load tasks — catch errors so we still reach yield and /health responds
+    # 3. Load tasks - catch errors so we still reach yield and /health responds
     try:
         tasks = load_tasks(INPUT_PATH)
         _state["tasks_total"] = len(tasks)
         _state["status"] = "processing"
-        logger.info("Loaded %d tasks — beginning processing", len(tasks))
+        logger.info("Loaded %d tasks - beginning processing", len(tasks))
     except Exception as load_err:
-        logger.error("Failed to load tasks: %s — will write empty results", load_err)
+        logger.error("Failed to load tasks: %s - will write empty results", load_err)
         tasks = []
         _state["tasks_total"] = 0
         _state["status"] = "error"
@@ -152,7 +152,7 @@ async def lifespan(app: FastAPI):
             logger.error("Pipeline error: %s", e, exc_info=True)
             _state["status"] = "error"
             _state["error"] = str(e)
-            # ── Always write results.json even on error ──
+            # -- Always write results.json even on error --
             # Missing file = score zero AND may fail harness validation.
             # An empty array at least produces valid JSON and a clean exit.
             try:
@@ -161,6 +161,10 @@ async def lifespan(app: FastAPI):
             except Exception as write_err:
                 logger.error("Failed to write fallback results.json: %s", write_err)
         finally:
+            # -- Critical: exit cleanly with code 0 --
+            # Send SIGTERM to ourselves so uvicorn runs its graceful shutdown
+            # and exits with code 0. os._exit(0) bypasses the uvicorn event loop,
+            # which can cause the harness to see a non-zero exit (RUNTIME_ERROR).
             # ── Critical: exit cleanly with code 0 ──
             # Send SIGTERM to ourselves so uvicorn runs its graceful shutdown
             # and exits with code 0. os._exit(0) bypasses the uvicorn event loop,
@@ -175,22 +179,22 @@ async def lifespan(app: FastAPI):
     # Yield control back to FastAPI so the HTTP server can start!
     yield
 
-    # ── SHUTDOWN PHASE ──
+    # -- SHUTDOWN PHASE --
     # background_worker's finally block sends SIGTERM to trigger this shutdown,
     # so by the time we get here the worker is already done or nearly done.
-    # We do NOT await it here — cancel() on run_in_executor is a no-op (threads
+    # We do NOT await it here - cancel() on run_in_executor is a no-op (threads
     # can't be cancelled by asyncio), and waiting risks a 10s deadlock if an
     # external SIGTERM arrives before the worker finishes.
     logger.info("Lifespan shutdown complete")
 
 
-# ── App ───────────────────────────────────────────────────────────────────────
+# -- App -----------------------------------------------------------------------
 
 app = FastAPI(
-    title="AMD Track 1 — General-Purpose AI Agent",
+    title="AMD Track 1 - General-Purpose AI Agent",
     description=(
         "Token-efficient AI agent for AMD Hackathon Track 1.\n\n"
-        "**Pipeline**: LangGraph waterfall → Local GGUF (Qwen2.5-1.5B → 3B) → "
+        "**Pipeline**: LangGraph waterfall -> Local GGUF (Qwen2.5-1.5B -> 3B) -> "
         "Fireworks API (smallest permitted model).\n\n"
         "**Scoring**: accuracy gate first, then ranked by total Fireworks tokens used."
     ),
@@ -202,13 +206,13 @@ app = FastAPI(
 )
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+# -- Endpoints -----------------------------------------------------------------
 
 @app.get(
     "/health",
     response_model=HealthResponse,
     summary="Liveness probe",
-    description="Always returns 200 while the process is alive. Responds immediately — before task processing completes.",
+    description="Always returns 200 while the process is alive. Responds immediately - before task processing completes.",
     tags=["ops"],
 )
 async def health() -> HealthResponse:

@@ -1,5 +1,5 @@
 """
-Task classifier — identifies category and difficulty score for each task.
+Task classifier - identifies category and difficulty score for each task.
 
 Approach (zero Fireworks cost):
 1. Fast regex/keyword pass (handles ~85% of tasks correctly)
@@ -7,14 +7,14 @@ Approach (zero Fireworks cost):
 3. Return: (category, difficulty_score 0.0-1.0)
 
 Categories (matching Track 1 spec):
-  1 factual        — explaining concepts, definitions
-  2 math           — arithmetic, word problems, projections
-  3 sentiment      — labelling + justification
-  4 summarization  — condensing passages
-  5 ner            — extracting named entities
-  6 code_debug     — finding/fixing bugs
-  7 logic          — constraint-based puzzles
-  8 code_gen       — writing functions from spec
+  1 factual        - explaining concepts, definitions
+  2 math           - arithmetic, word problems, projections
+  3 sentiment      - labelling + justification
+  4 summarization  - condensing passages
+  5 ner            - extracting named entities
+  6 code_debug     - finding/fixing bugs
+  7 logic          - constraint-based puzzles
+  8 code_gen       - writing functions from spec
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from src.prompts import (
 logger = logging.getLogger(__name__)
 
 
-# ── Valid category keys — defined at module level so classify() can reference it
+# -- Valid category keys - defined at module level so classify() can reference it
 CATEGORY_NAMES: dict[str, str] = {
     "factual":       "1-Factual Knowledge",
     "math":          "2-Mathematical Reasoning",
@@ -46,7 +46,7 @@ CATEGORY_NAMES: dict[str, str] = {
 }
 
 
-# ── Regex patterns for high-confidence classification ─────────────────────────
+# -- Regex patterns for high-confidence classification -------------------------
 _PATTERNS: list[Tuple[str, re.Pattern]] = [
     ("math", re.compile(
         r"\b(calculat|comput|how many|total|sum of|percentage|multiply|divide|"
@@ -102,7 +102,7 @@ def _difficulty_score(prompt: str, category: str) -> float:
     """
     Estimate difficulty 0-1 based on:
     - Signal keywords (hard/easy)
-    - Prompt length (longer → harder)
+    - Prompt length (longer -> harder)
     - Code block presence
     - Number of constraints
     """
@@ -135,11 +135,11 @@ def classify(prompt: str) -> Tuple[str, float]:
     category : str
         One of the 8 category keys.
     difficulty : float
-        0.0 (trivial) → 1.0 (very hard).
+        0.0 (trivial) -> 1.0 (very hard).
     """
     lower = prompt.lower()
 
-    # ── Phase 1: Regex fast-path ──────────────────────────────────────────────
+    # -- Phase 1: Regex fast-path ----------------------------------------------
     best_cat: str | None = None
     best_matches = 0
 
@@ -154,7 +154,7 @@ def classify(prompt: str) -> Tuple[str, float]:
         logger.debug("classify[regex] %s difficulty=%.2f", best_cat, difficulty)
         return best_cat, difficulty
 
-    # ── Phase 2: Keyword scoring (ordered by specificity) ────────────────────
+    # -- Phase 2: Keyword scoring (ordered by specificity) --------------------
     scores: dict[str, float] = {}
     for cat in CATEGORY_ORDER:
         scores[cat] = _keyword_score(lower, cat)
@@ -163,7 +163,7 @@ def classify(prompt: str) -> Tuple[str, float]:
     best_cat = max(CATEGORY_ORDER, key=lambda c: scores[c])
     difficulty = _difficulty_score(prompt, best_cat)
 
-    # ── Phase 3: Local LLM Fallback (if low keyword confidence) ──────────────
+    # -- Phase 3: Local LLM Fallback (if low keyword confidence) --------------
     if scores[best_cat] < 0.3 and local_model.is_available():
         system_msg = (
             "You are a text classifier. Classify the user's prompt into exactly ONE "

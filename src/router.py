@@ -1,15 +1,15 @@
 """
-Fireworks AI router — selects the smallest capable model for each task category.
+Fireworks AI router - selects the smallest capable model for each task category.
 
 CRITICAL RULES (from Track 1 spec):
-  - ALLOWED_MODELS is read STRICTLY via os.environ["ALLOWED_MODELS"] — no default,
+  - ALLOWED_MODELS is read STRICTLY via os.environ["ALLOWED_MODELS"] - no default,
     no fallback. If it's missing the container should fail loudly.
   - Only models in ALLOWED_MODELS are permitted. Calls to any other model ID
     INVALIDATE the submission (MODEL_VIOLATION).
-  - All calls MUST go through FIREWORKS_BASE_URL — read from os.environ["FIREWORKS_BASE_URL"].
+  - All calls MUST go through FIREWORKS_BASE_URL - read from os.environ["FIREWORKS_BASE_URL"].
 
 Strategy:
-  1. At first call, parse os.environ["ALLOWED_MODELS"].split(",") — exact model IDs
+  1. At first call, parse os.environ["ALLOWED_MODELS"].split(",") - exact model IDs
   2. Rank them by estimated size (from name heuristics) to pick smallest capable
   3. Hard guard in call_fireworks() rejects any model_id not in ALLOWED_MODELS
 """
@@ -24,20 +24,20 @@ from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# ── OpenAI client (Fireworks uses OpenAI-compatible API) ─────────────────────
+# -- OpenAI client (Fireworks uses OpenAI-compatible API) ---------------------
 try:
     from openai import OpenAI
     _OPENAI_AVAILABLE = True
 except ImportError:
     _OPENAI_AVAILABLE = False
-    logger.warning("openai package not installed — Fireworks calls disabled")
+    logger.warning("openai package not installed - Fireworks calls disabled")
 
-# ── Non-model config (safe to read with defaults) ─────────────────────────────
+# -- Non-model config (safe to read with defaults) -----------------------------
 MAX_RETRIES     = int(os.environ.get("FW_MAX_RETRIES", "2"))
 RETRY_DELAY     = float(os.environ.get("FW_RETRY_DELAY", "1.0"))
 REQUEST_TIMEOUT = int(os.environ.get("FW_TIMEOUT", "20"))  # must stay under 30s limit
 
-# ── ALLOWED_MODELS — parsed lazily on first use, never at import time ─────────
+# -- ALLOWED_MODELS - parsed lazily on first use, never at import time ---------
 # Parsed lazily so the module can be imported in tests without the env var set.
 _allowed_models_set: Optional[set[str]] = None
 _sorted_models: Optional[List[Tuple[float, str]]] = None
@@ -47,7 +47,7 @@ def _parse_allowed_models() -> List[str]:
     """
     Read and parse ALLOWED_MODELS from the environment.
 
-    Uses os.environ["ALLOWED_MODELS"] (strict — raises KeyError if not set,
+    Uses os.environ["ALLOWED_MODELS"] (strict - raises KeyError if not set,
     exactly as specified in the Track 1 participant guide).
 
     Returns a list of exact model ID strings.
@@ -96,20 +96,20 @@ def is_model_allowed(model_id: str) -> bool:
     return model_id in _allowed_models_set   # type: ignore[operator]
 
 
-# ── Model size estimation ─────────────────────────────────────────────────────
+# -- Model size estimation -----------------------------------------------------
 
 def _parse_model_size(model_id: str) -> float:
     """
     Estimate parameter count (billions) from model name.
-    Used only for routing priority — does NOT affect which models are permitted.
+    Used only for routing priority - does NOT affect which models are permitted.
     Fallback to 7.0B if no size can be inferred.
     """
     lower = model_id.lower()
     short = lower.split("/")[-1]   # strip accounts/fireworks/models/ prefix
 
-    # ── Generic heuristics ────────────────────────────────────────────────────
+    # -- Generic heuristics ----------------------------------------------------
     
-    # 1. MoE: "8x7b" → treat as ~30B effective
+    # 1. MoE: "8x7b" -> treat as ~30B effective
     moe = re.search(r"(\d+)x(\d+)[bB]", short)
     if moe:
         return float(moe.group(1)) * float(moe.group(2)) * 0.6
@@ -131,8 +131,8 @@ def _parse_model_size(model_id: str) -> float:
     return 7.0
 
 
-# ── Category → minimum model size (billions)
-# Routing preference — always constrained to ALLOWED_MODELS.
+# -- Category -> minimum model size (billions)
+# Routing preference - always constrained to ALLOWED_MODELS.
 # 
 # Generalized mapping:
 #   < 7B : Factual, text processing
@@ -180,7 +180,7 @@ def get_capable_models(category: str, difficulty: float) -> List[str]:
         )
         return capable
 
-    # All models are smaller than ideal — fallback to just the largest available
+    # All models are smaller than ideal - fallback to just the largest available
     _, fallback = _sorted_models[-1]
     logger.warning(
         "router[%s]: no model >= %.0fB in ALLOWED_MODELS; falling back to largest: %s",
@@ -189,7 +189,7 @@ def get_capable_models(category: str, difficulty: float) -> List[str]:
     return [fallback]
 
 
-# ── Fireworks client ──────────────────────────────────────────────────────────
+# -- Fireworks client ----------------------------------------------------------
 
 def _get_client() -> Optional["OpenAI"]:
     """
@@ -202,7 +202,7 @@ def _get_client() -> Optional["OpenAI"]:
         api_key  = os.environ["FIREWORKS_API_KEY"]
         base_url = os.environ["FIREWORKS_BASE_URL"]
     except KeyError as e:
-        logger.warning("Fireworks env var not set: %s — skipping API call", e)
+        logger.warning("Fireworks env var not set: %s - skipping API call", e)
         return None
 
     return OpenAI(
@@ -228,12 +228,12 @@ def call_fireworks(
     if not model_ids:
         return None, 0, 0
 
-    # ── Hard guard: reject any model not in ALLOWED_MODELS ───────────────────
+    # -- Hard guard: reject any model not in ALLOWED_MODELS -------------------
     for m in model_ids:
         if not is_model_allowed(m):
             logger.error(
                 "MODEL_VIOLATION PREVENTED: '%s' is not in ALLOWED_MODELS. "
-                "Call aborted — would have invalidated submission.", m
+                "Call aborted - would have invalidated submission.", m
             )
             return None, 0, 0
 
@@ -292,7 +292,7 @@ def call_fireworks(
     return None, 0, 0
 
 
-# ── Utility ───────────────────────────────────────────────────────────────────
+# -- Utility -------------------------------------------------------------------
 
 def get_available_models() -> List[str]:
     """Return the exact list from ALLOWED_MODELS (in size order)."""

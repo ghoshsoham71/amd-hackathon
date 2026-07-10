@@ -1,8 +1,8 @@
 """
-Category-specific system prompts — AMD Hackathon Track 1.
+Category-specific system prompts - AMD Hackathon Track 1.
 
 Design principles:
-1. Every token in the system prompt is SCORED — keep them minimal.
+1. Every token in the system prompt is SCORED - keep them minimal.
 2. Output guidance is appended to the USER message instead of duplicated here.
 3. For tasks requiring reasoning (logic, math), allow internal reasoning but
    enforce a strict final-answer format so validation works and output is short.
@@ -11,9 +11,9 @@ Design principles:
 
 from typing import Dict
 
-# ── Core system prompts ────────────────────────────────────────────────────────
+# -- Core system prompts --------------------------------------------------------
 # Rule: system prompt only. Output guidance is in OUTPUT_GUIDANCE (appended
-# to user message). Do NOT duplicate these here — it wastes scored tokens.
+# to user message). Do NOT duplicate these here - it wastes scored tokens.
 SYSTEM_PROMPTS: Dict[str, str] = {
     # Factual: direct answer, no filler, no caveats
     "factual": (
@@ -57,9 +57,9 @@ SYSTEM_PROMPTS: Dict[str, str] = {
     ),
 }
 
-# ── Output guidance appended to USER message (not duplicated from system) ──────
+# -- Output guidance appended to USER message (not duplicated from system) ------
 # These are short reminders that reinforce the format. They should NOT repeat
-# the system prompt verbatim — that wastes tokens.
+# the system prompt verbatim - that wastes tokens.
 OUTPUT_GUIDANCE: Dict[str, str] = {
     "factual":       "Answer in 1-3 sentences max.",
     "math":          "Show brief working if needed, then: ANSWER: <number>",
@@ -71,7 +71,7 @@ OUTPUT_GUIDANCE: Dict[str, str] = {
     "code_gen":      "Python code only. No prose.",
 }
 
-# ── Difficulty estimation keywords per category ────────────────────────────────
+# -- Difficulty estimation keywords per category --------------------------------
 DIFFICULTY_SIGNALS: Dict[str, Dict[str, list]] = {
     "factual": {
         "high": ["compare", "contrast", "explain why", "mechanism", "history of"],
@@ -110,7 +110,7 @@ DIFFICULTY_SIGNALS: Dict[str, Dict[str, list]] = {
     },
 }
 
-# ── Category detection keywords ────────────────────────────────────────────────
+# -- Category detection keywords ------------------------------------------------
 CATEGORY_KEYWORDS: Dict[str, list] = {
     "math": [
         "calculate", "compute", "how many", "total", "sum", "percentage", "%",

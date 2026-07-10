@@ -21,29 +21,29 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# ── Model paths ───────────────────────────────────────────────────────────────
+# -- Model paths ---------------------------------------------------------------
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/app/models"))
 
 MODEL_FILENAME = os.environ.get(
     "LOCAL_MODEL_FILENAME", "qwen2.5-3b-instruct-q4_k_m.gguf"
 )
 
-# ── Inference config ──────────────────────────────────────────────────────────
+# -- Inference config ----------------------------------------------------------
 N_CTX      = int(os.environ.get("LOCAL_N_CTX",     "4096"))
 N_THREADS  = int(os.environ.get("LOCAL_N_THREADS", "2"))
 MAX_TOKENS = int(os.environ.get("LOCAL_MAX_TOKENS","512"))
 
-# ── Thread locks for lazy loading ─────────────────────────────────────────────
+# -- Thread locks for lazy loading ---------------------------------------------
 _lock = threading.Lock()
 _model = None
 
-# ── Llama.cpp availability ────────────────────────────────────────────────────
+# -- Llama.cpp availability ----------------------------------------------------
 try:
     from llama_cpp import Llama
     _LLAMA_AVAILABLE = True
 except ImportError:
     _LLAMA_AVAILABLE = False
-    logger.warning("llama-cpp-python not installed — local inference unavailable")
+    logger.warning("llama-cpp-python not installed - local inference unavailable")
 
 
 def _load_model(path: Path, tier: str) -> Optional["Llama"]:
@@ -52,7 +52,7 @@ def _load_model(path: Path, tier: str) -> Optional["Llama"]:
         return None
 
     if not path.exists():
-        logger.warning("%s model not found at %s — local tier disabled", tier, path)
+        logger.warning("%s model not found at %s - local tier disabled", tier, path)
         return None
 
     logger.info("Loading %s model: %s", tier, path.name)
@@ -62,7 +62,7 @@ def _load_model(path: Path, tier: str) -> Optional["Llama"]:
             n_ctx=N_CTX,
             n_threads=N_THREADS,
             n_gpu_layers=0,       # CPU-only (grading env has no GPU)
-            use_mmap=True,        # Memory-map — only loads active pages
+            use_mmap=True,        # Memory-map - only loads active pages
             use_mlock=False,      # Don't lock pages (limited RAM)
             verbose=False,
         )
@@ -119,10 +119,10 @@ def infer(
     """
     model = _get_model()
     if model is None:
-        logger.warning("Local model unavailable — skipping inference")
+        logger.warning("Local model unavailable - skipping inference")
         return None
 
-    # ── Thread Safety: Lock during inference execution ──
+    # -- Thread Safety: Lock during inference execution --
     # llama.cpp's internal state is NOT thread-safe. Concurrent inference
     # on the same model instance causes memory corruption (Segmentation Fault).
     with _lock:
@@ -140,7 +140,7 @@ def infer(
 
             text = output["choices"][0]["text"].strip()
             tokens_used = output["usage"]["total_tokens"]
-            logger.debug("Local inference: %d tokens → %d chars", tokens_used, len(text))
+            logger.debug("Local inference: %d tokens -> %d chars", tokens_used, len(text))
             return text
 
         except Exception as e:

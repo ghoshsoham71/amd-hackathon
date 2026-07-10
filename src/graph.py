@@ -1,10 +1,10 @@
 """
-LangGraph agent graph — the central orchestrator for Track 1.
+LangGraph agent graph - the central orchestrator for Track 1.
 
 Graph flow:
-  START → classify → local_infer
-                          ├── PASS  → END          (free, no Fireworks tokens)
-                          └── FAIL  → compress_prompt → fireworks_call → END
+  START -> classify -> local_infer
+                          ├-- PASS  -> END          (free, no Fireworks tokens)
+                          └-- FAIL  -> compress_prompt -> fireworks_call -> END
 
 Local inference (Qwen2.5-3B) is attempted first for categories where a 3B model
 is reliable (factual, sentiment, summarization, NER). Hard categories (code, logic,
@@ -27,7 +27,7 @@ from src.token_counter import GLOBAL_TRACKER, TokenBudget, count_tokens
 
 logger = logging.getLogger(__name__)
 
-# ── State definition ──────────────────────────────────────────────────────────
+# -- State definition ----------------------------------------------------------
 
 class AgentState(TypedDict):
     # Input
@@ -62,21 +62,21 @@ class AgentState(TypedDict):
     error: str
 
 
-# ── Categories where local 3B is reliable enough to skip Fireworks ────────────
-# Code / logic / math require stronger reasoning → always go to Fireworks.
+# -- Categories where local 3B is reliable enough to skip Fireworks ------------
+# Code / logic / math require stronger reasoning -> always go to Fireworks.
 _LOCAL_CAPABLE_CATEGORIES = {"factual", "sentiment", "summarization", "ner"}
 
 # Difficulty threshold above which we skip local and go straight to Fireworks.
 # Keep this LOW (0.5) so only very easy tasks try local inference.
-# On 2 vCPU, local inference is ~3-5 tok/sec — only worth it for simple tasks.
+# On 2 vCPU, local inference is ~3-5 tok/sec - only worth it for simple tasks.
 _LOCAL_DIFFICULTY_CUTOFF = 0.5
 
-# Max tokens for local inference — keeps each call under ~30s on 2 vCPU.
+# Max tokens for local inference - keeps each call under ~30s on 2 vCPU.
 # Short answers (sentiment, factual, NER) don't need long outputs anyway.
 _LOCAL_MAX_TOKENS = 96
 
 
-# ── Node implementations ──────────────────────────────────────────────────────
+# -- Node implementations ------------------------------------------------------
 
 def classify_node(state: AgentState) -> AgentState:
     """Classify task category and difficulty. Zero API cost."""
@@ -85,7 +85,7 @@ def classify_node(state: AgentState) -> AgentState:
     sys_p = get_system_prompt(cat)
     guidance = get_output_guidance(cat)
 
-    logger.info("[%s] classify → %s (diff=%.2f)", state["task_id"], cat, diff)
+    logger.info("[%s] classify -> %s (diff=%.2f)", state["task_id"], cat, diff)
 
     return {
         **state,
@@ -129,7 +129,7 @@ def local_infer_node(state: AgentState) -> AgentState:
 
     if skip_local:
         logger.info(
-            "[%s] Skipping local inference (cat=%s diff=%.2f) → Fireworks",
+            "[%s] Skipping local inference (cat=%s diff=%.2f) -> Fireworks",
             state["task_id"], category, difficulty,
         )
         return {**state, "current_tier": 3, "confidence": 0.0}
@@ -164,11 +164,11 @@ def local_infer_node(state: AgentState) -> AgentState:
 def route_after_local(state: AgentState) -> str:
     """
     Conditional edge after local_infer_node.
-      - Local passed validation → END  (free answer, zero Fireworks tokens)
-      - Otherwise              → compress_prompt → fireworks_call
+      - Local passed validation -> END  (free answer, zero Fireworks tokens)
+      - Otherwise              -> compress_prompt -> fireworks_call
     """
     if state["current_tier"] == 1 and state.get("answer", ""):
-        logger.info("[%s] Local answer accepted — skipping Fireworks", state["task_id"])
+        logger.info("[%s] Local answer accepted - skipping Fireworks", state["task_id"])
         return "end"
     return "compress_prompt"
 
@@ -216,7 +216,7 @@ def fireworks_call_node(state: AgentState) -> AgentState:
     if not model_ids:
         return {**state, "answer": state.get("answer", ""), "error": "no_fw_models"}
 
-    # Tune max output tokens per category — avoids paying for unused token budget
+    # Tune max output tokens per category - avoids paying for unused token budget
     category = state["category"]
     if category in ("code_gen", "code_debug"):
         max_out = 1024
@@ -252,16 +252,16 @@ def fireworks_call_node(state: AgentState) -> AgentState:
     }
 
 
-# ── Build the graph ───────────────────────────────────────────────────────────
+# -- Build the graph -----------------------------------------------------------
 
 def build_graph() -> StateGraph:
     """
     Construct and compile the LangGraph agent.
 
     Flow:
-      START → classify → local_infer
-                              ├── pass  → END          (free, no Fireworks)
-                              └── fail  → compress_prompt → fireworks_call → END
+      START -> classify -> local_infer
+                              ├-- pass  -> END          (free, no Fireworks)
+                              └-- fail  -> compress_prompt -> fireworks_call -> END
     """
     builder = StateGraph(AgentState)
 
@@ -275,7 +275,7 @@ def build_graph() -> StateGraph:
     builder.add_edge(START, "classify")
     builder.add_edge("classify", "local_infer")
 
-    # Conditional: local passed → END, else → compress+fireworks
+    # Conditional: local passed -> END, else -> compress+fireworks
     builder.add_conditional_edges(
         "local_infer",
         route_after_local,
@@ -287,7 +287,7 @@ def build_graph() -> StateGraph:
     return builder.compile()
 
 
-# ── Compiled graph singleton ──────────────────────────────────────────────────
+# -- Compiled graph singleton --------------------------------------------------
 _graph = None
 _graph_lock = threading.Lock()
 

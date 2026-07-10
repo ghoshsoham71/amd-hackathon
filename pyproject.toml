@@ -1,5 +1,5 @@
 # =============================================================================
-# pyproject.toml — AMD Hackathon Track 1 Agent
+# pyproject.toml - AMD Hackathon Track 1 Agent
 # =============================================================================
 # Modern Python project config. Replaces requirements.txt.
 # Install: pip install .          (production)
@@ -17,26 +17,26 @@ description = "Token-efficient general-purpose AI agent for AMD Hackathon Track 
 requires-python = ">=3.11"
 
 dependencies = [
-    # ── Orchestration ──────────────────────────────────────────────────────────
+    # -- Orchestration ----------------------------------------------------------
     "langgraph>=0.2.0",
     "langchain-core>=0.2.0",
 
-    # ── Fireworks API (OpenAI-compatible) ──────────────────────────────────────
+    # -- Fireworks API (OpenAI-compatible) --------------------------------------
     "openai>=1.40.0",
 
-    # ── Token counting ─────────────────────────────────────────────────────────
+    # -- Token counting ---------------------------------------------------------
     "tiktoken>=0.7.0",
 
-    # ── Web server (health endpoint + async task runner) ──────────────────────
+    # -- Web server (health endpoint + async task runner) ----------------------
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.30.0",
 
-    # ── Utilities ─────────────────────────────────────────────────────────────
+    # -- Utilities -------------------------------------------------------------
     "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
-# Local GGUF inference — compiled from source in Dockerfile (CPU-only)
+# Local GGUF inference - compiled from source in Dockerfile (CPU-only)
 # Not listed as a hard dep so `pip install .` works without build tools
 local-model = [
     "llama-cpp-python>=0.2.90",
@@ -55,13 +55,13 @@ amd-agent = "src.main:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
-# ── Ruff (linting) ─────────────────────────────────────────────────────────────
+# -- Ruff (linting) -------------------------------------------------------------
 [tool.ruff]
 target-version = "py311"
 line-length = 100
 select = ["E", "F", "I", "UP"]
 ignore = ["E501"]
 
-# ── pytest ─────────────────────────────────────────────────────────────────────
+# -- pytest ---------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
