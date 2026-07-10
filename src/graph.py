@@ -219,15 +219,15 @@ def fireworks_call_node(state: AgentState) -> AgentState:
     # Tune max output tokens per category - avoids paying for unused token budget
     category = state["category"]
     if category in ("code_gen", "code_debug"):
-        max_out = 1024
+        max_out = 2048
     elif category == "logic":
-        max_out = 600
+        max_out = 1024
     elif category == "math":
-        max_out = 256
+        max_out = 1024
     elif category in ("sentiment", "ner"):
-        max_out = 150
+        max_out = 256
     else:
-        max_out = 400
+        max_out = 1024
 
     answer, in_tok, out_tok = router.call_fireworks(
         model_ids=model_ids,

@@ -15,45 +15,46 @@ from typing import Dict
 # Rule: system prompt only. Output guidance is in OUTPUT_GUIDANCE (appended
 # to user message). Do NOT duplicate these here - it wastes scored tokens.
 SYSTEM_PROMPTS: Dict[str, str] = {
-    # Factual: direct answer, no filler, no caveats
+    # Factual: provide a complete and accurate answer
     "factual": (
-        "You are a factual assistant. Answer directly and concisely. "
-        "No preamble, no caveats, no apologies."
+        "You are an expert factual assistant. Provide a complete, accurate, and helpful answer. "
+        "Do not include unnecessary conversational filler."
     ),
-    # Math: allow internal reasoning but output ONLY the final numeric answer
+    # Math: strict CoT reasoning required
     "math": (
-        "Solve the problem step by step, then output ONLY: ANSWER: <number>"
+        "You are an expert mathematician. Think step-by-step to solve the problem. "
+        "Write out your complete reasoning clearly. Always end your response with: ANSWER: <number>"
     ),
-    # Sentiment: strict label, no prose
+    # Sentiment: clear label with brief justification
     "sentiment": (
-        "Output ONLY: SENTIMENT: Positive, SENTIMENT: Negative, "
-        "SENTIMENT: Neutral, or SENTIMENT: Mixed. No explanation."
+        "Classify the sentiment of the text. First provide a brief one-sentence reason, "
+        "then end with: SENTIMENT: Positive, SENTIMENT: Negative, SENTIMENT: Neutral, or SENTIMENT: Mixed."
     ),
-    # Summarization: produce only the summary, match requested length
+    # Summarization: focus on quality and completeness
     "summarization": (
-        "Summarize the provided text. Output ONLY the summary. "
-        "No preamble or meta-commentary."
+        "You are an expert summarizer. Capture all key themes, critical points, and the main idea accurately. "
+        "Output the summary directly without preamble."
     ),
-    # NER: strict JSON, no prose around it
+    # NER: strict JSON formatting but robust extraction
     "ner": (
-        'Extract named entities. Output ONLY a JSON array: '
-        '[{"text":"...","type":"PERSON|ORG|LOC|DATE|OTHER"}]. '
-        "No markdown fences, no explanation."
+        'You are an expert at Named Entity Recognition. Carefully extract all valid entities. '
+        'Output ONLY a valid JSON array: [{"text":"...","type":"PERSON|ORG|LOC|DATE|OTHER"}]. '
+        "Ensure the JSON is perfectly formatted."
     ),
-    # Code debug: return corrected code only, minimal comment if essential
+    # Code debug: CoT debugging
     "code_debug": (
-        "Fix the bug in the code. Return ONLY the corrected, complete code. "
-        "No explanation before or after."
+        "You are a senior software engineer. First, briefly explain the bug and how to fix it. "
+        "Then, provide the completely corrected code inside a ```python block. Ensure the code is robust."
     ),
-    # Logic: MUST reason to get correct answer, but format is strict
+    # Logic: strict CoT reasoning
     "logic": (
-        "Reason through the problem carefully, then output ONLY: ANSWER: <value>. "
-        "Put all reasoning before the ANSWER line."
+        "You are an expert logician. Reason through the problem step-by-step. "
+        "State your deductions clearly, then end your response with: ANSWER: <value>"
     ),
-    # Code gen: Python only, no prose, no markdown explanation outside code block
+    # Code gen: clear requirements and robust code
     "code_gen": (
-        "Write correct, complete, idiomatic Python. "
-        "Return ONLY the code. No prose, no explanation."
+        "You are a senior software engineer. Write robust, correct, and idiomatic Python code. "
+        "Include necessary comments and handle edge cases. Output the code inside a ```python block."
     ),
 }
 
@@ -61,14 +62,14 @@ SYSTEM_PROMPTS: Dict[str, str] = {
 # These are short reminders that reinforce the format. They should NOT repeat
 # the system prompt verbatim - that wastes tokens.
 OUTPUT_GUIDANCE: Dict[str, str] = {
-    "factual":       "Answer in 1-3 sentences max.",
-    "math":          "Show brief working if needed, then: ANSWER: <number>",
-    "sentiment":     "SENTIMENT: <Positive|Negative|Neutral|Mixed>",
-    "summarization": "Provide ONLY the summary. Match length requested.",
-    "ner":           'JSON array only: [{"text":"...","type":"..."}]',
-    "code_debug":    "Corrected code only. No prose.",
-    "logic":         "Reason first, then end with: ANSWER: <value>",
-    "code_gen":      "Python code only. No prose.",
+    "factual":       "Answer directly and factually.",
+    "math":          "Think step-by-step. End with: ANSWER: <number>",
+    "sentiment":     "Reason briefly. End with: SENTIMENT: <Label>",
+    "summarization": "Provide a complete and accurate summary.",
+    "ner":           'Valid JSON array only: [{"text":"...","type":"..."}]',
+    "code_debug":    "Explain the fix, then provide the corrected code.",
+    "logic":         "Think step-by-step. End with: ANSWER: <value>",
+    "code_gen":      "Write robust Python code.",
 }
 
 # -- Difficulty estimation keywords per category --------------------------------

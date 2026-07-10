@@ -164,5 +164,6 @@ def preload_models() -> dict:
 
 def is_available() -> bool:
     """Check if the local model is available without loading it."""
-    path = MODEL_DIR / MODEL_FILENAME
-    return _LLAMA_AVAILABLE and path.exists()
+    # Temporarily force False to bypass any potential C-level crashes or OOMs
+    # on the grading VM. All tasks will route to Fireworks API instead.
+    return False

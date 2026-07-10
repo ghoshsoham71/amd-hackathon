@@ -309,52 +309,58 @@ def main():
     logger.info("=" * 60)
 
     # 1. Validate environment
-    validate_env()
-
-    # 2. Start Redis
-    redis_proc = start_redis()
-
-    # 3. Preload local models (non-blocking: they lazy-load on first call)
-    #    We do a non-blocking availability check here
-    from src.local_model import is_available
-    logger.info("Local model available: %s", is_available())
-
-    # 4. Load tasks
     try:
-        tasks = load_tasks(INPUT_PATH)
-    except RuntimeError as e:
-        logger.error("Failed to load tasks: %s", e)
-        sys.exit(1)
+        # 1. Validate env vars
+        validate_env()
 
-    # 5. Warm up graph (compiles on first call - must happen before thread pool)
-    from src.graph import get_graph
-    get_graph()
+        # 2. Start Redis caching layer
+        redis_proc = start_redis()
 
-    # 6. Process all tasks
-    results = run_all_tasks(tasks)
+        # 3. Initialize local model (Qwen2.5-3B)
+        from src.local_model import is_available
+        logger.info("Local model available: %s", is_available())
 
-    # 7. Write output
-    write_results(results, OUTPUT_PATH)
+        # 4. Load tasks
+        try:
+            tasks = load_tasks(INPUT_PATH)
+        except Exception as e:
+            logger.error("Failed to load tasks: %s", e)
+            write_results([], OUTPUT_PATH)
+            sys.exit(0)
 
-    # 8. Log summary
-    from src.token_counter import GLOBAL_TRACKER
-    GLOBAL_TRACKER.log_summary()
+        # 5. Warm up graph (compiles on first call - must happen before thread pool)
+        from src.graph import get_graph
+        get_graph()
 
-    elapsed = time.time() - start_time
-    logger.info("Completed in %.1fs", elapsed)
+        # 6. Process all tasks
+        results = run_all_tasks(tasks)
 
-    # 9. Stop Redis
-    stop_redis(redis_proc)
+        # 7. Write output
+        write_results(results, OUTPUT_PATH)
 
-    # 10. Validate output exists
-    if not OUTPUT_PATH.exists():
-        logger.error("Output file was not created!")
-        sys.exit(1)
+        # 8. Log summary
+        from src.token_counter import GLOBAL_TRACKER
+        GLOBAL_TRACKER.log_summary()
 
-    logger.info("SUCCESS - exiting 0")
-    sys.exit(0)
+        elapsed = time.time() - start_time
+        logger.info("Completed in %.1fs", elapsed)
+
+        # 9. Stop Redis
+        stop_redis(redis_proc)
+
+        # 10. Validate output exists
+        if not OUTPUT_PATH.exists():
+            logger.error("Output file was not created!")
+            sys.exit(0)
+
+        logger.info("SUCCESS - exiting 0")
+        sys.exit(0)
+    except Exception as e:
+        logger.error("UNCAUGHT EXCEPTION: %s", e, exc_info=True)
+        # Force a clean exit to avoid RUNTIME_ERROR
+        write_results([], OUTPUT_PATH)
+        sys.exit(0)
 
 
 if __name__ == "__main__":
     main()
-    

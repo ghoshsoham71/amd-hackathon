@@ -26,9 +26,9 @@ WORKDIR /build
 
 # -- Download GGUF models -------------------------------------------------------
 # We do this FIRST so changing pyproject.toml doesn't trigger a 1.8GB re-download!
-RUN pip install --no-cache-dir huggingface_hub
+# RUN pip install --no-cache-dir huggingface_hub
 RUN mkdir -p /models
-RUN python -c "import huggingface_hub; huggingface_hub.hf_hub_download(repo_id='Qwen/Qwen2.5-3B-Instruct-GGUF', filename='qwen2.5-3b-instruct-q4_k_m.gguf', local_dir='/models'); print('Local model downloaded')"
+# RUN python -c "import huggingface_hub; huggingface_hub.hf_hub_download(repo_id='Qwen/Qwen2.5-3B-Instruct-GGUF', filename='qwen2.5-3b-instruct-q4_k_m.gguf', local_dir='/models'); print('Local model downloaded')"
 
 # Copy project definition (pyproject.toml is the single source of truth)
 COPY pyproject.toml .
@@ -44,12 +44,12 @@ RUN pip install --no-cache-dir --prefix=/install \
     --no-deps 2>/dev/null || true
 
 # Install all runtime deps from pyproject.toml (excluding llama-cpp-python optional)
-RUN pip install --no-cache-dir --prefix=/install .
+RUN pip install --no-cache-dir --prefix=/install --ignore-installed .
 
 # Install llama-cpp-python separately: CPU-only, no BLAS
 # CMAKE_ARGS control: no native CPU extensions (portable across x86_64)
-RUN CMAKE_ARGS="-DLLAMA_NATIVE=OFF -DLLAMA_BLAS=OFF" \
-    pip install --no-cache-dir --prefix=/install "llama-cpp-python>=0.2.90"
+# RUN CMAKE_ARGS="-DLLAMA_NATIVE=OFF -DLLAMA_BLAS=OFF" \
+#     pip install --no-cache-dir --prefix=/install "llama-cpp-python>=0.2.90"
 
 
 # -- Stage 2: Runtime ----------------------------------------------------------
@@ -104,3 +104,4 @@ RUN python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 EXPOSE 8080
 
 ENTRYPOINT ["/app/entrypoint.sh"]
+CMD []

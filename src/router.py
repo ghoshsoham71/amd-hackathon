@@ -139,14 +139,14 @@ def _parse_model_size(model_id: str) -> float:
 #   ~ 7B : Reasoning, logic
 #  >=13B : Code generation
 CATEGORY_MIN_PARAMS: Dict[str, float] = {
-    "factual":       1.0,
-    "sentiment":     1.0,
-    "summarization": 1.0,
-    "ner":           1.0,
-    "math":          7.0,
-    "logic":         7.0,
-    "code_debug":    7.0,
-    "code_gen":      13.0,
+    "factual":       7.0,
+    "sentiment":     7.0,
+    "summarization": 7.0,
+    "ner":           7.0,
+    "math":          13.0,
+    "logic":         13.0,
+    "code_debug":    13.0,
+    "code_gen":      30.0,
 }
 
 DIFFICULTY_UPSIZE_THRESHOLD = 0.75   # bump to next tier if difficulty >= this

@@ -23,16 +23,7 @@ if [ -d "/input" ]; then echo "[entrypoint] /input  permissions: $(stat -c '%a %
 # - --workers 1      -> single worker (task state is in-process)
 # - --log-level info -> structured logs to stdout
 # - --timeout-graceful-shutdown 30 -> allow cleanup on SIGTERM
-echo "[entrypoint] Starting uvicorn..."
+echo "[entrypoint] Starting agent..."
 
-if [ "$#" -gt 0 ]; then
-    exec "$@"
-fi
+exec python -m src.main
 
-exec python -m uvicorn src.app:app \
-  --host 0.0.0.0 \
-  --port 8080 \
-  --workers 1 \
-  --log-level info \
-  --timeout-graceful-shutdown 30 \
-  --no-access-log
