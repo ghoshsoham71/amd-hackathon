@@ -16,10 +16,7 @@ models/*.gguf
 models/*.bin
 models/*.safetensors
 !models/.gitkeep
-
-# Test output
-local_test/output/
-
+.mypy_cache/
 # Logs
 *.log
 

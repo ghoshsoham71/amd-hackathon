@@ -194,7 +194,7 @@ app = FastAPI(
     title="AMD Track 1 - General-Purpose AI Agent",
     description=(
         "Token-efficient AI agent for AMD Hackathon Track 1.\n\n"
-        "**Pipeline**: LangGraph waterfall -> Local GGUF (Qwen2.5-1.5B -> 3B) -> "
+        "**Pipeline**: LangGraph waterfall -> Local Transformers (Qwen2.5-0.5B-Instruct) -> "
         "Fireworks API (smallest permitted model).\n\n"
         "**Scoring**: accuracy gate first, then ranked by total Fireworks tokens used."
     ),

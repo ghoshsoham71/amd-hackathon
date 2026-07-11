@@ -18,7 +18,6 @@ models/*.bin
 models/*.safetensors
 
 # Test artifacts
-local_test/
 test_*.py
 *.log
 

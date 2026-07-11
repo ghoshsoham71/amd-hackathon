@@ -218,6 +218,7 @@ def call_fireworks(
     user_prompt: str,
     max_tokens: int = 512,
     temperature: float = 0.1,
+    stop: Optional[List[str]] = None,
 ) -> Tuple[Optional[str], int, int]:
     """
     Call Fireworks via the OpenAI-compatible API, falling back dynamically.
@@ -255,8 +256,10 @@ def call_fireworks(
                     max_tokens=max_tokens,
                     temperature=temperature,
                     top_p=0.9,
+                    stop=stop,
                 )
-                text = response.choices[0].message.content.strip()
+                raw_content = response.choices[0].message.content
+                text = raw_content.strip() if raw_content else ""
                 usage = response.usage
                 input_tok  = usage.prompt_tokens      if usage else 0
                 output_tok = usage.completion_tokens  if usage else 0

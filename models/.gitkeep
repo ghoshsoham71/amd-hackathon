@@ -1,2 +1,0 @@
-# Models are downloaded at Docker build time via Dockerfile
-# See Dockerfile builder stage for download commands

@@ -27,6 +27,14 @@ dependencies = [
     # -- Token counting ---------------------------------------------------------
     "tiktoken>=0.7.0",
 
+    # -- Local HF inference (replaces llama-cpp-python) ------------------------
+    # transformers: model loading + generation
+    # torch (CPU): required by transformers; CPU-only build ~800MB wheel
+    # accelerate: enables low_cpu_mem_usage=True in from_pretrained
+    "transformers>=4.42.0",
+    "accelerate>=0.30.0",
+    "torch>=2.2.0",
+
     # -- Web server (health endpoint + async task runner) ----------------------
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.30.0",
@@ -36,16 +44,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Local GGUF inference - compiled from source in Dockerfile (CPU-only)
-# Not listed as a hard dep so `pip install .` works without build tools
-local-model = [
-    "llama-cpp-python>=0.2.90",
-]
-
 dev = [
     "pytest>=8.0.0",
     "httpx>=0.27.0",          # FastAPI test client
     "ruff>=0.4.0",            # linting
+    "pymupdf>=1.24.0",        # PDF parsing (dev only)
 ]
 
 [project.scripts]

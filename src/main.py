@@ -316,7 +316,7 @@ def main():
         # 2. Start Redis caching layer
         redis_proc = start_redis()
 
-        # 3. Initialize local model (Qwen2.5-3B)
+        # 3. Initialize local model (Qwen2.5-0.5B-Instruct)
         from src.local_model import is_available
         logger.info("Local model available: %s", is_available())
 

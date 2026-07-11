@@ -1,166 +1,380 @@
 """
-Prompt compressor - strips token fat before any Fireworks API call.
+Prompt compressor — strips token fat before any Fireworks API call.
 
-Techniques applied (in order):
-1. Instruction normalization - replace verbose instruction phrases with compact ones
-2. Passage pruning - for summarization/NER tasks, remove low-information sentences
-   using TF-IDF scoring
-3. Stopword-light trimming - remove filler from context (not from task content)
-4. Token budget enforcement - truncate to fit within model context window
+Techniques applied in order (most to least safe):
 
-Design goal: Compress aggressively enough to save tokens, conservatively enough
-to preserve all task-relevant information. Accuracy > token savings.
+1.  Unicode / whitespace normalization
+    - Zero-width spaces, non-breaking spaces, smart quotes → ASCII
+    - Collapse 3+ newlines → 2; collapse 3+ spaces → 1
+
+2.  Boilerplate preamble removal
+    - "Please could you...", "I would like you to...", "Can you please..."
+
+3.  Redundant output-guidance deduplication
+    - Strip output formats from the prompt if they are already present.
+
+4.  Filler word stripping (Generic)
+    - Removes common filler words ("please", "kindly", "basically", etc.) 
+      from the instruction part of the prompt without needing hardcoded phrases.
+
+5.  Markdown / formatting strip (for non-code tasks)
+    - Strip # headings, ** bold **, _ italic _
+
+6.  Free Local LLM Compression
+    - Pass the prompt to the local 0.5B model and ask it to rewrite it shorter.
+    - Since local tokens cost 0 points, this is a free way to reduce Fireworks tokens!
+
+7.  TF-IDF sentence scoring (summarization / NER / factual)
+    - Score each sentence by TF-IDF and prune the fluff sentences.
+
+8.  Sentence-boundary truncation (fallback)
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import re
-from typing import Dict, List, Optional
+from collections import Counter
 
 from src.token_counter import count_tokens
-from src import local_model
 
 logger = logging.getLogger(__name__)
 
-# -- Verbose -> compact instruction phrase replacements -------------------------
-_INSTRUCTION_REPLACEMENTS: list[tuple[re.Pattern, str]] = [
-    # Preambles
-    (re.compile(r"please\s+(can\s+you\s+)?", re.I), ""),
-    (re.compile(r"i\s+(would|'d)\s+like\s+(you\s+)?to\s+", re.I), ""),
-    (re.compile(r"can\s+you\s+please\s+", re.I), ""),
-    (re.compile(r"could\s+you\s+(please\s+)?", re.I), ""),
-    (re.compile(r"i\s+need\s+you\s+to\s+", re.I), ""),
-    # Verbose summarize instructions
-    (re.compile(r"summarize\s+the\s+following\s+(text|passage|paragraph)\s+(in|into)", re.I),
-     "Summarize"),
-    (re.compile(r"summarise\s+the\s+following\s+(text|passage|paragraph)\s+(in|into)", re.I),
-     "Summarize"),
-    # Verbose NER instructions
-    (re.compile(r"extract\s+all\s+named\s+entities\s+(and\s+their\s+types\s+)?from(\s+the\s+following)?:?", re.I),
-     "Extract entities from:"),
-    # Verbose sentiment instructions
-    (re.compile(r"classify\s+the\s+sentiment\s+of\s+(the\s+following\s+)?(text|review|statement|sentence):?", re.I),
-     "Classify sentiment:"),
-    # Trailing filler
-    (re.compile(r"\.\s*please\s+be\s+concise\.?\s*$", re.I), "."),
-    (re.compile(r"\.\s*keep\s+(it\s+)?brief\.?\s*$", re.I), "."),
-    (re.compile(r"\.\s*do\s+not\s+include\s+unnecessary\s+details?\.?\s*$", re.I), "."),
+# ---------------------------------------------------------------------------
+# 1. Unicode / whitespace normalization
+# ---------------------------------------------------------------------------
+_UNICODE_REPLACEMENTS: list[tuple[str, str]] = [
+    ("\u200b", ""),    # zero-width space
+    ("\u200c", ""),    # zero-width non-joiner
+    ("\u200d", ""),    # zero-width joiner
+    ("\u00a0", " "),   # non-breaking space
+    ("\u2019", "'"),   # right single quotation mark
+    ("\u2018", "'"),   # left single quotation mark
+    ("\u201c", '"'),   # left double quotation mark
+    ("\u201d", '"'),   # right double quotation mark
+    ("\u2013", "-"),   # en dash
+    ("\u2014", "-"),   # em dash
+    ("\u2026", "..."), # ellipsis
+    ("\u00ad", ""),    # soft hyphen
 ]
 
+def _normalize_unicode(text: str) -> str:
+    for src, tgt in _UNICODE_REPLACEMENTS:
+        text = text.replace(src, tgt)
+    return text
 
-def _normalize_instructions(text: str) -> str:
-    """Apply instruction normalization replacements."""
-    for pattern, replacement in _INSTRUCTION_REPLACEMENTS:
-        text = pattern.sub(replacement, text)
-    # Collapse multiple spaces/newlines
-    text = re.sub(r" {2,}", " ", text)
+
+def _normalize_whitespace(text: str) -> str:
+    text = re.sub(r"[ \t]{2,}", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r" +\n", "\n", text)
+    text = re.sub(r"\n +", "\n", text)
     return text.strip()
 
 
+# ---------------------------------------------------------------------------
+# 2. Boilerplate preamble removal
+# ---------------------------------------------------------------------------
+_PREAMBLE_PATTERNS: list[re.Pattern] = [
+    re.compile(r"^(please\s+)?(can|could)\s+you\s+(please\s+)?", re.I),
+    re.compile(r"^i\s+(would|'d)\s+like\s+(you\s+)?to\s+", re.I),
+    re.compile(r"^i\s+need\s+(you\s+)?to\s+", re.I),
+    re.compile(r"^i\s+want\s+(you\s+)?to\s+", re.I),
+    re.compile(r"^your\s+task\s+is\s+to\s+", re.I),
+    re.compile(r"^your\s+job\s+is\s+to\s+", re.I),
+    re.compile(r"\.\s*(please\s+be\s+(concise|brief|short)\.?\s*)$", re.I),
+    re.compile(r"\.\s*(keep\s+(it\s+)?(concise|brief|short)\.?\s*)$", re.I),
+    re.compile(r"\.\s*(do\s+not\s+include\s+unnecessary\s+details?\.?\s*)$", re.I),
+    re.compile(r"\.\s*(answer\s+directly\.?\s*)$", re.I),
+]
+
+def _strip_preambles(text: str) -> str:
+    for pat in _PREAMBLE_PATTERNS:
+        text = pat.sub("", text)
+    return text.strip()
 
 
-# -- Main compress function -----------------------------------------------------
+# ---------------------------------------------------------------------------
+# 3. Output-guidance deduplication
+# ---------------------------------------------------------------------------
+def _dedup_output_guidance(text: str, guidance: str) -> str:
+    if not guidance or not text:
+        return text
+    stripped_guidance = re.escape(guidance.strip())
+    pattern = re.compile(r"\s*" + stripped_guidance + r"\s*$", re.I)
+    return pattern.sub("", text).strip()
 
+
+# ---------------------------------------------------------------------------
+# 4. Filler Word Stripping (Generic)
+# ---------------------------------------------------------------------------
+_FILLER_WORDS = {
+    "please", "kindly", "basically", "essentially", "simply", "just",
+    "following", "provided", "below", "therein", "moreover", "furthermore"
+}
+
+def _strip_filler_words(text: str, category: str) -> str:
+    """
+    Remove safe filler words from the instruction part of the prompt (first ~150 chars).
+    This handles unknown phrasing generically instead of relying on regexes.
+    """
+    if not text:
+        return text
+    
+    split_idx = min(150, len(text))
+    # Try to find a natural break near 150 chars
+    if split_idx == 150:
+        match = re.search(r"[:\n]", text[:150])
+        if match:
+            split_idx = match.end()
+
+    head = text[:split_idx]
+    tail = text[split_idx:]
+
+    words = head.split()
+    kept_words = []
+    for w in words:
+        clean_w = w.lower().strip(".,:;!?")
+        if clean_w not in _FILLER_WORDS:
+            kept_words.append(w)
+    
+    return " ".join(kept_words) + (" " + tail if tail else "")
+
+
+# ---------------------------------------------------------------------------
+# 5. Markdown formatting strip (non-code tasks only)
+# ---------------------------------------------------------------------------
+_MARKDOWN_PATTERNS: list[re.Pattern] = [
+    re.compile(r"^#{1,6}\s+", re.M),
+    re.compile(r"\*{2}(.+?)\*{2}", re.S),
+    re.compile(r"\*(.+?)\*", re.S),
+    re.compile(r"_{2}(.+?)_{2}", re.S),
+    re.compile(r"_(.+?)_", re.S),
+    re.compile(r"^[-*]{3,}\s*$", re.M),
+    re.compile(r"\[(.+?)\]\(.+?\)", re.S),
+    re.compile(r"^>\s+", re.M),
+]
+
+def _strip_markdown(text: str) -> str:
+    for pat in _MARKDOWN_PATTERNS:
+        text = pat.sub(r"\1" if pat.groups else "", text)
+    return text.strip()
+
+
+# ---------------------------------------------------------------------------
+# 6. Free Local LLM Compression
+# ---------------------------------------------------------------------------
+def _local_llm_compress(text: str, available_tokens: int) -> str:
+    """
+    Passes the prompt to the local model to rewrite it generically.
+    Costs 0 tokens but saves Fireworks tokens!
+    """
+    from src import local_model
+    if not local_model.is_available():
+        return text
+
+    # Only compress if prompt is large enough to be worth it (> 40 tokens)
+    # but small enough to fit in local model context window (max input ~1024)
+    orig_tok = count_tokens(text)
+    if orig_tok < 40 or orig_tok > 800:
+        return text
+
+    system_msg = (
+        "You are an expert prompt compressor. Rewrite the user's text to be as "
+        "concise as possible while keeping all instructions, facts, and constraints. "
+        "Do NOT answer the prompt. Output ONLY the compressed text."
+    )
+
+    answer = local_model.infer(
+        system_prompt=system_msg,
+        user_prompt=text,
+        max_tokens=min(available_tokens, orig_tok),
+        temperature=0.05,
+    )
+
+    if answer and len(answer) > 10:
+        new_tok = count_tokens(answer)
+        if new_tok < orig_tok:
+            # Basic sanity check: did it refuse or loop?
+            if not re.search(r"^(i cannot|i am unable|as an ai)", answer, re.I):
+                logger.info("Local LLM compressed prompt: %d -> %d tok", orig_tok, new_tok)
+                return answer
+
+    return text
+
+
+# ---------------------------------------------------------------------------
+# 7. TF-IDF sentence scoring + pruning
+# ---------------------------------------------------------------------------
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+def _split_sentences(text: str) -> list[str]:
+    raw = _SENTENCE_SPLIT.split(text)
+    return [s.strip() for s in raw if s.strip()]
+
+def _tfidf_scores(sentences: list[str]) -> list[float]:
+    if not sentences:
+        return []
+
+    def tokenize(s: str) -> list[str]:
+        return re.findall(r"\b[a-z]{2,}\b", s.lower())
+
+    tokenized = [tokenize(s) for s in sentences]
+    n = len(sentences)
+
+    df: Counter = Counter()
+    for tokens in tokenized:
+        df.update(set(tokens))
+
+    scores: list[float] = []
+    for i, tokens in enumerate(tokenized):
+        if not tokens:
+            scores.append(0.0)
+            continue
+        tf = Counter(tokens)
+        score = sum(
+            (tf[w] / len(tokens)) * math.log((n + 1) / (df[w] + 1))
+            for w in tf
+        )
+        if re.search(r"\d", sentences[i]):
+            score *= 1.2
+        scores.append(score)
+
+    return scores
+
+def _prune_by_tfidf(text: str, available_tokens: int, keep_first: int = 2) -> str:
+    sentences = _split_sentences(text)
+    if len(sentences) <= keep_first + 1:
+        return text
+
+    instruction = sentences[:keep_first]
+    body = sentences[keep_first:]
+
+    scores = _tfidf_scores(body)
+    ranked = sorted(range(len(body)), key=lambda i: scores[i], reverse=True)
+
+    budget = available_tokens - count_tokens(" ".join(instruction)) - 10
+    kept_indices: set[int] = set()
+    used = 0
+    for idx in ranked:
+        tok = count_tokens(body[idx])
+        if used + tok > budget:
+            break
+        kept_indices.add(idx)
+        used += tok
+
+    kept_body = [body[i] for i in sorted(kept_indices)]
+    return " ".join(instruction + kept_body)
+
+
+# ---------------------------------------------------------------------------
+# 8. Sentence-boundary truncation
+# ---------------------------------------------------------------------------
+def _truncate_at_sentence(text: str, max_tokens: int) -> str:
+    sentences = _split_sentences(text)
+    result: list[str] = []
+    used = 0
+    for sent in sentences:
+        tok = count_tokens(sent) + 1
+        if used + tok > max_tokens - 5:
+            break
+        result.append(sent)
+        used += tok
+
+    if result:
+        return " ".join(result)
+
+    words = text.split()
+    out: list[str] = []
+    cur = 0
+    for w in words:
+        wt = count_tokens(w) + 1
+        if cur + wt > max_tokens - 5:
+            out.append("[...]")
+            break
+        out.append(w)
+        cur += wt
+    return " ".join(out)
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+_PRUNABLE_CATEGORIES = {"summarization", "ner", "factual"}
+_STRIP_MD_CATEGORIES = {"factual", "summarization", "math", "logic", "sentiment", "ner"}
+
+
+# ---------------------------------------------------------------------------
+# Main compress function
+# ---------------------------------------------------------------------------
 def compress_prompt(
     prompt: str,
     category: str,
     available_tokens: int,
     aggressive: bool = False,
+    guidance_text: str = "",
 ) -> str:
-    """
-    Compress a prompt to fit within `available_tokens`.
-
-    Parameters
-    ----------
-    prompt : str
-        The original user prompt.
-    category : str
-        Task category (guides compression strategy).
-    available_tokens : int
-        Maximum tokens the compressed prompt can occupy.
-    aggressive : bool
-        If True, apply more aggressive pruning (used for final Fireworks tier).
-
-    Returns
-    -------
-    str
-        Compressed prompt (may equal original if already within budget).
-    """
     original_tokens = count_tokens(prompt)
 
-    # Already fits -> no-op
     if original_tokens <= available_tokens:
         return prompt
 
     logger.info(
-        "compress[%s]: %d -> target %d tokens",
-        category, original_tokens, available_tokens,
+        "compress[%s]: %d → target %d tokens (aggressive=%s)",
+        category, original_tokens, available_tokens, aggressive,
     )
 
     compressed = prompt
 
-    # -- Step 1: Instruction normalization (always safe) -----------------------
-    compressed = _normalize_instructions(compressed)
+    # 1. Unicode & whitespace
+    compressed = _normalize_unicode(compressed)
+    compressed = _normalize_whitespace(compressed)
     if count_tokens(compressed) <= available_tokens:
         return compressed
 
-    # -- Step 2: Use Local LLM for intelligent semantic compression --
-    # The local model has 0 token cost, so we use it to rewrite the prompt.
-    if local_model.is_available():
-        system_msg = (
-            "You are an expert prompt compressor. Your job is to rewrite the user's "
-            "text to be as concise as possible while keeping all core instructions, "
-            "facts, constraints, and data. Do NOT answer the prompt, ONLY compress it. "
-            "Output ONLY the compressed text."
+    # 2. Output guidance dedup
+    if guidance_text:
+        compressed = _dedup_output_guidance(compressed, guidance_text)
+    if count_tokens(compressed) <= available_tokens:
+        return compressed
+
+    # 3. Preamble removal
+    compressed = _strip_preambles(compressed)
+    if count_tokens(compressed) <= available_tokens:
+        return compressed
+
+    # 4. Generic filler stripping
+    compressed = _strip_filler_words(compressed, category)
+    if count_tokens(compressed) <= available_tokens:
+        return compressed
+
+    # 5. Markdown strip
+    if category in _STRIP_MD_CATEGORIES:
+        compressed = _strip_markdown(compressed)
+        if count_tokens(compressed) <= available_tokens:
+            return compressed
+
+    # 6. Local LLM Compression (Free tokens!)
+    # Only try this if we still need to compress significantly
+    if count_tokens(compressed) > available_tokens * 1.2:
+        compressed = _local_llm_compress(compressed, available_tokens)
+        if count_tokens(compressed) <= available_tokens:
+            return compressed
+
+    # 7. TF-IDF pruning
+    if category in _PRUNABLE_CATEGORIES:
+        budget_for_prune = available_tokens if not aggressive else int(available_tokens * 0.85)
+        compressed = _prune_by_tfidf(compressed, budget_for_prune)
+        if count_tokens(compressed) <= available_tokens:
+            return compressed
+
+    # 8. Sentence-boundary truncation
+    if count_tokens(compressed) > available_tokens:
+        compressed = _truncate_at_sentence(compressed, available_tokens)
+        logger.warning(
+            "compress[%s]: sentence-truncated to %d tokens",
+            category, count_tokens(compressed),
         )
-        answer = local_model.infer(
-            system_prompt=system_msg,
-            user_prompt=compressed,
-            max_tokens=available_tokens,
-            temperature=0.05,
-        )
-        if answer and len(answer) > 10:
-            logger.info("Local LLM compression successful for %s", category)
-            # If the LLM successfully shrank it within budget, return it!
-            if count_tokens(answer) <= available_tokens:
-                return answer
-            
-            # If it's still slightly too big, we at least start with the compressed version
-            # before applying hard truncation
-            if count_tokens(answer) < count_tokens(compressed):
-                compressed = answer
 
-    # -- Step 3: Hard truncation fallback (last resort) ------------------------
-
-    words = compressed.split()
-    truncated: list[str] = []
-    current = 0
-    for word in words:
-        w_tokens = count_tokens(word) + 1
-        if current + w_tokens > available_tokens - 5:
-            truncated.append("[truncated]")
-            break
-        truncated.append(word)
-        current += w_tokens
-
-    compressed = " ".join(truncated)
-    logger.warning(
-        "compress[%s]: hard truncated to %d tokens", category, count_tokens(compressed)
-    )
     return compressed
-
-
-def estimate_compression_ratio(prompt: str, category: str) -> float:
-    """Estimate how much this prompt can be compressed (0=none, 1=fully compressible)."""
-    original = count_tokens(prompt)
-    compressed = _normalize_instructions(prompt)
-    normalized = count_tokens(compressed)
-    ratio = 1.0 - (normalized / max(original, 1))
-
-    # Long passages in content-heavy categories compress well
-    if category in ("summarization", "ner", "factual") and original > 300:
-        ratio = min(ratio + 0.3, 0.8)
-
-    return round(ratio, 3)

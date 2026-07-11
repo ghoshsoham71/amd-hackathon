@@ -1,14 +1,17 @@
 """
-Local GGUF model inference via llama-cpp-python.
+Local model inference via HuggingFace Transformers (CPU).
 
-Only ONE model (Qwen2.5-3B-Instruct Q4_K_M) is loaded to stay safely 
-within the 4GB RAM budget.
+Replaces llama-cpp-python with a pure-Python alternative that:
+  - Requires NO C++ compilation
+  - Runs Qwen/Qwen2.5-0.5B-Instruct (~1 GB on disk, ~1.3 GB RAM)
+  - Stays well within the 4 GB RAM / 2 vCPU grading environment
+  - Model is baked into the Docker image at /app/models/hf_model
+    (no runtime download needed — satisfies the 60-second startup rule)
 
-The model uses:
-  - n_gpu_layers=0  (no GPU in grading env)
-  - use_mmap=True   (memory-map the model)
-  - n_ctx=4096      (context window)
-  - n_threads=2     (matches 2 vCPU grading env)
+Public API (unchanged from previous llama-cpp version):
+  infer(system_prompt, user_prompt, max_tokens, temperature) -> Optional[str]
+  is_available() -> bool
+  preload_models() -> dict
 """
 
 from __future__ import annotations
@@ -21,131 +24,161 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# -- Model paths ---------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Config — all overridable via env vars
+# ---------------------------------------------------------------------------
 MODEL_DIR = Path(os.environ.get("MODEL_DIR", "/app/models"))
+HF_MODEL_PATH = Path(os.environ.get("LOCAL_HF_MODEL_PATH", str(MODEL_DIR / "hf_model")))
 
-MODEL_FILENAME = os.environ.get(
-    "LOCAL_MODEL_FILENAME", "qwen2.5-3b-instruct-q4_k_m.gguf"
-)
+# Inference hyper-params
+MAX_NEW_TOKENS  = int(os.environ.get("LOCAL_MAX_TOKENS",    "256"))
+MAX_INPUT_TOKENS = int(os.environ.get("LOCAL_MAX_INPUT",   "1024"))
 
-# -- Inference config ----------------------------------------------------------
-N_CTX      = int(os.environ.get("LOCAL_N_CTX",     "4096"))
-N_THREADS  = int(os.environ.get("LOCAL_N_THREADS", "2"))
-MAX_TOKENS = int(os.environ.get("LOCAL_MAX_TOKENS","512"))
-
-# -- Thread locks for lazy loading ---------------------------------------------
-_lock = threading.Lock()
-_model = None
-
-# -- Llama.cpp availability ----------------------------------------------------
+# ---------------------------------------------------------------------------
+# Transformers availability check
+# ---------------------------------------------------------------------------
 try:
-    from llama_cpp import Llama
-    _LLAMA_AVAILABLE = True
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+    import torch
+    _TRANSFORMERS_AVAILABLE = True
 except ImportError:
-    _LLAMA_AVAILABLE = False
-    logger.warning("llama-cpp-python not installed - local inference unavailable")
+    _TRANSFORMERS_AVAILABLE = False
+    logger.warning("transformers/torch not installed — local inference unavailable")
+
+# ---------------------------------------------------------------------------
+# Thread-safe lazy singleton
+# ---------------------------------------------------------------------------
+_lock       = threading.Lock()
+_tokenizer  = None
+_model      = None
+_available  = None   # cached bool — None means not-yet-checked
 
 
-def _load_model(path: Path, tier: str) -> Optional["Llama"]:
-    """Load a GGUF model. Returns None if file missing or llama-cpp unavailable."""
-    if not _LLAMA_AVAILABLE:
-        return None
+def _load() -> bool:
+    """Load tokenizer + model. Returns True on success. Called once under lock."""
+    global _tokenizer, _model
 
-    if not path.exists():
-        logger.warning("%s model not found at %s - local tier disabled", tier, path)
-        return None
+    if not _TRANSFORMERS_AVAILABLE:
+        logger.warning("transformers not installed — local model disabled")
+        return False
 
-    logger.info("Loading %s model: %s", tier, path.name)
-    try:
-        model = Llama(
-            model_path=str(path),
-            n_ctx=N_CTX,
-            n_threads=N_THREADS,
-            n_gpu_layers=0,       # CPU-only (grading env has no GPU)
-            use_mmap=True,        # Memory-map - only loads active pages
-            use_mlock=False,      # Don't lock pages (limited RAM)
-            verbose=False,
+    if not HF_MODEL_PATH.exists():
+        logger.warning(
+            "Local HF model not found at %s — local inference disabled. "
+            "Bake the model into the Docker image during build.",
+            HF_MODEL_PATH,
         )
-        logger.info("%s model loaded successfully", tier)
-        return model
-    except Exception as e:
-        logger.error("Failed to load %s model: %s", tier, e)
-        return None
+        return False
+
+    logger.info("Loading local model from %s …", HF_MODEL_PATH)
+    try:
+        tok = AutoTokenizer.from_pretrained(
+            str(HF_MODEL_PATH),
+            local_files_only=True,
+            trust_remote_code=True,
+        )
+        mdl = AutoModelForCausalLM.from_pretrained(
+            str(HF_MODEL_PATH),
+            local_files_only=True,
+            torch_dtype=torch.float32,   # CPU: float32 (bfloat16 not always supported)
+            device_map="cpu",
+            low_cpu_mem_usage=True,
+            trust_remote_code=True,
+        )
+        mdl.eval()
+        _tokenizer = tok
+        _model     = mdl
+        logger.info("Local model loaded successfully (%.0f M params approx)",
+                    sum(p.numel() for p in mdl.parameters()) / 1e6)
+        return True
+    except Exception as exc:
+        logger.error("Failed to load local model: %s", exc)
+        return False
 
 
-def _get_model() -> Optional["Llama"]:
-    """Return (lazily loaded) model."""
-    global _model
-    if _model is not None:
-        return _model
+def _ensure_loaded() -> bool:
+    """Return True if the model is ready. Loads on first call (thread-safe)."""
+    global _available
+    if _available is not None:
+        return _available
     with _lock:
-        if _model is None:
-            _model = _load_model(MODEL_DIR / MODEL_FILENAME, "Local 3B")
-    return _model
+        if _available is None:
+            _available = _load()
+    return _available
 
 
-def _build_chat_prompt(system: str, user: str, model: "Llama") -> str:
-    """
-    Build a chat-formatted prompt using the model's built-in tokenizer.
-    Falls back to a generic ChatML format if the model doesn't support it.
-    """
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user",   "content": user},
-    ]
-    try:
-        # llama-cpp-python ≥0.2 supports apply_chat_template
-        return model.tokenizer().apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
-    except Exception:
-        # Fallback: generic ChatML
-        return (
-            f"<|im_start|>system\n{system}<|im_end|>\n"
-            f"<|im_start|>user\n{user}<|im_end|>\n"
-            f"<|im_start|>assistant\n"
-        )
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def is_available() -> bool:
+    """Return True if the local model is loaded and ready."""
+    return _ensure_loaded()
 
 
 def infer(
     system_prompt: str,
     user_prompt: str,
-    max_tokens: int = MAX_TOKENS,
+    max_tokens: int = MAX_NEW_TOKENS,
     temperature: float = 0.1,
     top_p: float = 0.9,
 ) -> Optional[str]:
     """
-    Run local inference.
+    Run local inference using the loaded HF model.
+
+    Returns the generated text string, or None on failure.
+    Thread-safe: the model itself is read-only after load; HF generate() is
+    safe for concurrent calls on CPU when inputs are separate tensors.
     """
-    model = _get_model()
-    if model is None:
-        logger.warning("Local model unavailable - skipping inference")
+    if not _ensure_loaded():
+        logger.debug("Local model unavailable — skipping inference")
         return None
 
-    # -- Thread Safety: Lock during inference execution --
-    # llama.cpp's internal state is NOT thread-safe. Concurrent inference
-    # on the same model instance causes memory corruption (Segmentation Fault).
-    with _lock:
-        try:
-            prompt_text = _build_chat_prompt(system_prompt, user_prompt, model)
+    try:
+        # Build chat-formatted prompt using the model's own template
+        messages = [
+            {"role": "system",  "content": system_prompt},
+            {"role": "user",    "content": user_prompt},
+        ]
+        # apply_chat_template adds BOS/EOS tokens correctly for Qwen
+        prompt_text = _tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
 
-            output = model(
-                prompt_text,
-                max_tokens=max_tokens,
+        inputs = _tokenizer(
+            prompt_text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=MAX_INPUT_TOKENS,
+        )
+        input_len = inputs["input_ids"].shape[-1]
+
+        with torch.no_grad():
+            output_ids = _model.generate(
+                **inputs,
+                max_new_tokens=max_tokens,
                 temperature=temperature,
                 top_p=top_p,
-                stop=["<|im_end|>", "<|endoftext|>", "\n\n\n"],
-                echo=False,
+                do_sample=(temperature > 0.01),
+                pad_token_id=_tokenizer.eos_token_id,
+                eos_token_id=_tokenizer.eos_token_id,
             )
 
-            text = output["choices"][0]["text"].strip()
-            tokens_used = output["usage"]["total_tokens"]
-            logger.debug("Local inference: %d tokens -> %d chars", tokens_used, len(text))
-            return text
+        # Decode only the newly generated tokens (strip echoed prompt)
+        new_tokens = output_ids[0][input_len:]
+        text = _tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
 
-        except Exception as e:
-            logger.error("Local inference error: %s", e)
-            return None
+        logger.debug(
+            "Local infer: input=%d new=%d chars=%d",
+            input_len, len(new_tokens), len(text),
+        )
+        return text if text else None
+
+    except Exception as exc:
+        logger.error("Local inference error: %s", exc)
+        return None
 
 
 def preload_models() -> dict:
@@ -153,17 +186,8 @@ def preload_models() -> dict:
     Preload the local model at startup.
     Returns dict with model availability status.
     """
-    logger.info("Preloading local model...")
-    m = _get_model()
-    status = {
-        "model_available": m is not None,
-    }
-    logger.info("Model status: %s", status)
+    logger.info("Preloading local HF model …")
+    ok = _ensure_loaded()
+    status = {"model_available": ok}
+    logger.info("Local model status: %s", status)
     return status
-
-
-def is_available() -> bool:
-    """Check if the local model is available without loading it."""
-    # Temporarily force False to bypass any potential C-level crashes or OOMs
-    # on the grading VM. All tasks will route to Fireworks API instead.
-    return False

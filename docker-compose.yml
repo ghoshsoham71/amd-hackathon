@@ -4,8 +4,8 @@
 # Usage:
 #   1. Copy .env.example -> .env and fill in your credentials
 #   2. docker compose up --build
-#   3. Place tasks.json in ./local_test/input/
-#   4. Check ./local_test/output/results.json after completion
+#   3. Place tasks.json in ./input/
+#   4. Check ./output/results.json after completion
 #   5. Health check: curl http://localhost:8080/health
 #      Status:       curl http://localhost:8080/status
 #      Metrics:      curl http://localhost:8080/metrics
@@ -51,8 +51,8 @@ services:
     ports:
       - "8080:8080"     # /health  /status  /metrics
     volumes:
-      - ./local_test/input:/input:ro
-      - ./local_test/output:/output
+      - ./input:/input:ro
+      - ./output:/output
       - ./src:/app/src:ro   # hot-reload source during dev
     restart: "no"
     healthcheck:
