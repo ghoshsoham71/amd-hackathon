@@ -17,7 +17,7 @@ A robust, production-ready, and highly token-optimized AI agent built for the AM
 Because the grading harness strictly requires a `linux/amd64` architecture, the image MUST be built using Docker Buildx:
 
 ```bash
-docker buildx build --platform linux/amd64 -t ghoshsoham71/amd-track1:v8 --push .
+docker buildx build --platform linux/amd64 -t ghoshsoham71/amd-track1:v14 --push .
 ```
 
 *Note: The HuggingFace model (`Qwen2.5-0.5B-Instruct`) and PyTorch CPU wheels are downloaded during the build step, resulting in a ~2.5GB image. If you run into severe caching issues where source code changes aren't being picked up, append `--no-cache` to the command.*
@@ -44,7 +44,7 @@ docker run --rm \
   -e FIREWORKS_BASE_URL="https://api.fireworks.ai/inference/v1" \
   -e ALLOWED_MODELS="accounts/fireworks/models/llama-v3p1-8b-instruct" \
   -p 8080:8080 \
-  ghoshsoham71/amd-track1:v8
+  ghoshsoham71/amd-track1:v14
 ```
 
 The container will launch, execute the graph, output to `output/results.json`, and cleanly shut down.

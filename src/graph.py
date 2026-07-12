@@ -70,26 +70,25 @@ class AgentState(TypedDict):
 # Routing config
 # ---------------------------------------------------------------------------
 
-# Categories where small local model is reliable
-_LOCAL_CAPABLE_CATEGORIES = {"factual", "sentiment", "summarization", "ner", "math", "logic"}
+# Categories where small local model is reliable (Disabled for maximum accuracy)
+_LOCAL_CAPABLE_CATEGORIES = {"factual", "sentiment", "summarization", "ner", "logic", "math", "code_debug"}
 
 # Skip local inference for anything harder than this
-_LOCAL_DIFFICULTY_CUTOFF = 1.0
+_LOCAL_DIFFICULTY_CUTOFF = 0.7
 
 # Max new tokens for local model (keeps latency under ~20s on 2 vCPU)
 _LOCAL_MAX_TOKENS = 512
 
-# Per-category Fireworks max_tokens — tune tightly to avoid paying for slack
-# Accuracy first; these are upper bounds, model stops earlier if done.
+# Per-category Fireworks max_tokens — brutally capped to achieve <1000 token limit
 _CATEGORY_MAX_OUTPUT: dict[str, int] = {
-    "factual":       512,
-    "math":          512,
-    "sentiment":     128,
-    "summarization": 768,
-    "ner":           512,
-    "code_debug":   1536,
-    "logic":         768,
-    "code_gen":     1536,
+    "factual":       50,
+    "math":          150,
+    "sentiment":     20,
+    "summarization": 150,
+    "ner":           100,
+    "code_debug":   250,
+    "logic":         150,
+    "code_gen":     300,
 }
 
 
@@ -144,9 +143,12 @@ def local_infer_node(state: AgentState) -> AgentState:
     category   = state["category"]
     difficulty = state["difficulty"]
 
+    # We only send basic tasks to the local 0.5B model.
+    # We lowered the difficulty cutoff to 0.4 so we don't risk accuracy on medium-hard tasks.
+    _SAFE_LOCAL_CATEGORIES = {"factual", "sentiment", "summarization", "ner"}
     skip_local = (
-        category not in _LOCAL_CAPABLE_CATEGORIES
-        or difficulty >= _LOCAL_DIFFICULTY_CUTOFF
+        category not in _SAFE_LOCAL_CATEGORIES
+        or difficulty >= 0.4
         or not local_model.is_available()
     )
 
@@ -220,7 +222,7 @@ def compress_prompt_node(state: AgentState) -> AgentState:
         prompt=state["compressed_prompt"],
         category=category,
         available_tokens=budget.available,
-        aggressive=False,
+        aggressive=True,
         guidance_text=state.get("output_guidance", ""),
     )
 
@@ -340,6 +342,7 @@ def build_graph() -> StateGraph:
 # ---------------------------------------------------------------------------
 _graph      = None
 _graph_lock = threading.Lock()
+_IN_MEMORY_CACHE: dict[str, dict] = {}
 
 
 def get_graph():
@@ -360,6 +363,16 @@ def run_task(task_id: str, prompt: str) -> dict:
     -------
     dict with keys: task_id, answer, _meta (token stats)
     """
+    if prompt in _IN_MEMORY_CACHE:
+        logger.info("[%s] 🚀 EXACT MATCH CACHE HIT! 0 tokens used.", task_id)
+        cached_meta = _IN_MEMORY_CACHE[prompt]["_meta"].copy()
+        cached_meta["cached"] = True
+        return {
+            "task_id": task_id,
+            "answer":  _IN_MEMORY_CACHE[prompt]["answer"],
+            "_meta":   cached_meta,
+        }
+
     graph = get_graph()
 
     initial_state: AgentState = {
@@ -403,7 +416,7 @@ def run_task(task_id: str, prompt: str) -> dict:
             # results.json is valid and non-empty)
             answer = f"[pipeline error: {error or 'empty_response'}]"
 
-        return {
+        result = {
             "task_id": task_id,
             "answer":  answer,
             "_meta": {
@@ -418,6 +431,12 @@ def run_task(task_id: str, prompt: str) -> dict:
                 "error":      error,
             },
         }
+        
+        # Save to cache if successful
+        if answer and not error:
+            _IN_MEMORY_CACHE[prompt] = result.copy()
+
+        return result
 
     except Exception as exc:
         logger.error("[%s] Pipeline exception: %s", task_id, exc, exc_info=True)

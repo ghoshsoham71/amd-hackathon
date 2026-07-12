@@ -107,23 +107,29 @@ def _dedup_output_guidance(text: str, guidance: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 4. Filler Word Stripping (Generic)
+# 4. Filler & Stop Word Stripping
 # ---------------------------------------------------------------------------
 _FILLER_WORDS = {
     "please", "kindly", "basically", "essentially", "simply", "just",
     "following", "provided", "below", "therein", "moreover", "furthermore"
 }
 
-def _strip_filler_words(text: str, category: str) -> str:
+_STOP_WORDS = {
+    "a", "an", "the", "of", "to", "in", "for", "with", "on", "at", "from",
+    "by", "about", "as", "into", "like", "through", "after", "over",
+    "between", "out", "against", "during", "without", "before", "under"
+}
+
+def _strip_filler_words(text: str, category: str, aggressive: bool = False) -> str:
     """
     Remove safe filler words from the instruction part of the prompt (first ~150 chars).
-    This handles unknown phrasing generically instead of relying on regexes.
+    If aggressive=True, also remove standard English stopwords globally.
     """
     if not text:
         return text
     
+    # Process filler words on the head
     split_idx = min(150, len(text))
-    # Try to find a natural break near 150 chars
     if split_idx == 150:
         match = re.search(r"[:\n]", text[:150])
         if match:
@@ -132,14 +138,25 @@ def _strip_filler_words(text: str, category: str) -> str:
     head = text[:split_idx]
     tail = text[split_idx:]
 
-    words = head.split()
-    kept_words = []
-    for w in words:
+    head_words = head.split()
+    kept_head = []
+    for w in head_words:
         clean_w = w.lower().strip(".,:;!?")
         if clean_w not in _FILLER_WORDS:
-            kept_words.append(w)
+            kept_head.append(w)
     
-    return " ".join(kept_words) + (" " + tail if tail else "")
+    processed_text = " ".join(kept_head) + (" " + tail if tail else "")
+
+    if aggressive:
+        # Strip stopwords globally to aggressively shrink tokens
+        words = processed_text.split()
+        kept_all = []
+        for w in words:
+            if w.lower().strip(".,:;!?") not in _STOP_WORDS:
+                kept_all.append(w)
+        processed_text = " ".join(kept_all)
+
+    return processed_text
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +333,6 @@ def compress_prompt(
     guidance_text: str = "",
 ) -> str:
     original_tokens = count_tokens(prompt)
-
     if original_tokens <= available_tokens:
         return prompt
 
@@ -344,8 +360,8 @@ def compress_prompt(
     if count_tokens(compressed) <= available_tokens:
         return compressed
 
-    # 4. Generic filler stripping
-    compressed = _strip_filler_words(compressed, category)
+    # 4. Generic filler & stopword stripping
+    compressed = _strip_filler_words(compressed, category, aggressive=aggressive)
     if count_tokens(compressed) <= available_tokens:
         return compressed
 

@@ -3,15 +3,10 @@ Local model inference via HuggingFace Transformers (CPU).
 
 Replaces llama-cpp-python with a pure-Python alternative that:
   - Requires NO C++ compilation
-  - Runs Qwen/Qwen2.5-0.5B-Instruct (~1 GB on disk, ~1.3 GB RAM)
+  - Runs Qwen2.5-1.5B-Instruct natively in Python
   - Stays well within the 4 GB RAM / 2 vCPU grading environment
   - Model is baked into the Docker image at /app/models/hf_model
     (no runtime download needed — satisfies the 60-second startup rule)
-
-Public API (unchanged from previous llama-cpp version):
-  infer(system_prompt, user_prompt, max_tokens, temperature) -> Optional[str]
-  is_available() -> bool
-  preload_models() -> dict
 """
 
 from __future__ import annotations

@@ -23,26 +23,26 @@ SYSTEM_PROMPTS: Dict[str, str] = {
     # ~10 tokens
     "factual": "Answer directly and concisely. No intro or filler.",
 
-    # ~9 tokens
-    "math": "Calculate. Output ONLY the final number. ANSWER: <number>",
+    # ~10 tokens
+    "math": "Show calculation steps. End with: ANSWER: <number>",
+
+    # ~14 tokens
+    "sentiment": "Provide a 1-sentence reason, then end with: SENTIMENT: <Label>",
 
     # ~10 tokens
-    "sentiment": "End with: SENTIMENT: Positive/Negative/Neutral/Mixed. No other text.",
-
-    # ~10 tokens
-    "summarization": "Summarize the text directly and concisely. No intro.",
+    "summarization": "Provide a summary exactly as requested. No intro.",
 
     # ~12 tokens
     "ner": 'Output ONLY JSON: [{"text":"...","type":"PERSON|ORG|LOC|DATE|OTHER"}]',
 
     # ~13 tokens
-    "code_debug": "Fix bug. Output ONLY python code in ```python block. No text.",
+    "code_debug": "Fix bug. Output ONLY raw python code. NO markdown wrappers. No text.",
 
     # ~12 tokens
     "logic": "Reason minimally. End with: ANSWER: <value>",
 
     # ~11 tokens
-    "code_gen": "Output ONLY Python code in ```python block. No tests or comments.",
+    "code_gen": "Output ONLY raw Python code. NO markdown wrappers. No tests/comments.",
 }
 
 # ---------------------------------------------------------------------------
@@ -52,13 +52,13 @@ SYSTEM_PROMPTS: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 OUTPUT_GUIDANCE: Dict[str, str] = {
     "factual":       "",                        # No extra guidance needed
-    "math":          "End: ANSWER: <number>",
-    "sentiment":     "End: SENTIMENT: <Label>",
+    "math":          "Show steps, then end: ANSWER: <number>",
+    "sentiment":     "Give 1-sentence reason, then end: SENTIMENT: <Label>",
     "summarization": "",
     "ner":           'JSON only: [{"text":"...","type":"..."}]',
-    "code_debug":    "Fix + corrected code.",
+    "code_debug":    "Fix + code only. NO markdown blocks like ```.",
     "logic":         "End: ANSWER: <value>",
-    "code_gen":      "Python code only.",
+    "code_gen":      "Code only. NO markdown blocks like ```.",
 }
 
 # ---------------------------------------------------------------------------

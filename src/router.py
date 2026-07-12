@@ -163,11 +163,11 @@ def get_capable_models(category: str, difficulty: float) -> List[str]:
     if not _sorted_models:
         return []
 
+    # Determine baseline size needed for this use-case
     min_params = CATEGORY_MIN_PARAMS.get(category, 7.0)
-    if difficulty >= DIFFICULTY_UPSIZE_THRESHOLD:
-        min_params *= 1.5
 
     # Filter and collect all models that meet the minimum size requirement
+    # (We removed the 1.5x upsize penalty for high difficulty to save tokens)
     capable = [
         model_id for size, model_id in _sorted_models
         if size >= min_params

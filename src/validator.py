@@ -20,7 +20,7 @@ from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
-PASS_THRESHOLD = float(os.environ.get("VALIDATOR_THRESHOLD", "0.65"))
+PASS_THRESHOLD = float(os.environ.get("VALIDATOR_THRESHOLD", "0.75"))
 
 # Answers shorter than this are probably incomplete
 MIN_ANSWER_CHARS = {

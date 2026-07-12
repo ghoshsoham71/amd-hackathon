@@ -27,13 +27,11 @@ dependencies = [
     # -- Token counting ---------------------------------------------------------
     "tiktoken>=0.7.0",
 
-    # -- Local HF inference (replaces llama-cpp-python) ------------------------
-    # transformers: model loading + generation
-    # torch (CPU): required by transformers; CPU-only build ~800MB wheel
-    # accelerate: enables low_cpu_mem_usage=True in from_pretrained
-    "transformers>=4.42.0",
-    "accelerate>=0.30.0",
+    # -- Local HF inference ----------------------------------------------------
+    # We use transformers + torch for local HF inference
+    "transformers>=4.40.0",
     "torch>=2.2.0",
+    "accelerate>=0.29.0",
 
     # -- Web server (health endpoint + async task runner) ----------------------
     "fastapi>=0.111.0",

@@ -12,7 +12,7 @@ set -euo pipefail
 # -- Config --------------------------------------------------------------------
 DOCKERHUB_USER="${DOCKERHUB_USER:?Error: set DOCKERHUB_USER env var}"
 IMAGE_NAME="amd-track1"
-TAG="${TAG:-v8}"
+TAG="${TAG:-v14}"
 FULL_TAG="${DOCKERHUB_USER}/${IMAGE_NAME}:${TAG}"
 
 echo "=================================================="

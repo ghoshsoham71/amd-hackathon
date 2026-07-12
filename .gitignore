@@ -19,6 +19,7 @@ models/*.safetensors
 .mypy_cache/
 # Logs
 *.log
+.ruff_cache/
 
 # IDE
 .vscode/

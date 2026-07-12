@@ -50,7 +50,7 @@ CATEGORY_NAMES: dict[str, str] = {
 _PATTERNS: list[Tuple[str, re.Pattern]] = [
     ("math", re.compile(
         r"\b(calculat|comput|how many|total|sum of|percentage|multiply|divide|"
-        r"arith|equat|remain|profit|loss|interest|averag|mean\b|median|"
+        r"arith|equat|remaining|items remain|profit|loss|interest|averag|mean\b|median|"
         r"probab|fraction|\d+\s*[\+\-\*\/]\s*\d+|\d+%)\b",
         re.I,
     )),
@@ -61,7 +61,7 @@ _PATTERNS: list[Tuple[str, re.Pattern]] = [
     )),
     ("summarization", re.compile(
         r"\b(summari[zs]e|summary|condense|tldr|brief(ly)?|"
-        r"in (one|1|two|2) sentence|key points|main idea|shorten)\b",
+        r"in (?:exactly )?(?:one|1|two|2|three|3) sentence|key points|main idea|shorten)\b",
         re.I,
     )),
     ("ner", re.compile(
